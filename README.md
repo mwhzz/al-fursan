@@ -1,105 +1,106 @@
 # Al Fursan Equestrian Academy — PWA
 
-Student portal + admin console for the academy. Installable PWA, works offline for
-reading, English / বাংলা toggle, no build step (plain HTML/CSS/JS).
+Rider portal + academy console. Installable PWA, works offline for reading,
+English / বাংলা, light and dark themes, no build step (plain HTML/CSS/JS).
+
+**v2.0.0** — rebuilt end to end against [docs/UX-AUDIT.md](docs/UX-AUDIT.md) (all 62 findings fixed).
 
 ---
 
-## 1. Logo boshao (30 second)
-
-Attached logo ta save koro ekhane:
-
-```
-assets/logo.png     (square PNG, 512×512 hole best)
-```
-
-Logo na thakle app ta built-in `assets/icon.svg` mark use korbe — kichu bhangbe na.
-
-## 2. Local e cholao
+## Quick start
 
 ```bash
-npx serve .
-# or
-python -m http.server 8080
+npx serve .        # or: python -m http.server 8080
 ```
 
-Browser: `http://localhost:8080`
+Demo logins (no backend needed — data stays in that browser):
 
-**Demo login** (Supabase setup na korle):
+| Role  | Login |
+| ----- | ----- |
+| Rider | pick **Zawad** from the list, PIN `1111` |
+| Staff | tap **Staff**, `owner` / `alfursan` |
 
-| Role    | Login                   |
-| ------- | ----------------------- |
-| Student | `Zawad` / PIN `1111`    |
-| Student | `Rahat` / PIN `3333`    |
-| Admin   | password `alfursan`     |
-
-Demo mode e sob data **shudhu oi browser er vitor** thake.
-
-## 3. Vercel e deploy
+## Deploy to Vercel
 
 ```bash
-npm i -g vercel
-vercel        # preview
-vercel --prod # live
+npm i -g vercel && vercel --prod
 ```
 
-Othoba: GitHub e push kore vercel.com > **Add New Project** > repo select > Deploy.
-Kono framework/build command lagbe na (Framework Preset: **Other**).
+Or push to GitHub → vercel.com → **Add New Project** → Framework Preset **Other**,
+no build command.
 
-## 4. Supabase connect (sob phone e sync korar jonno)
+## Connect Supabase (so every phone shares the same data)
 
-1. [supabase.com](https://supabase.com) e free project banao.
-2. **SQL Editor** > New query > `supabase/schema.sql` er purota paste kore **Run**.
-   - 4 din (Fri/Sat/Mon/Wed) × 5 ta slot (4:00, 4:50, 5:40, 6:30, 7:20 PM) auto toiri hoye jabe
-   - default admin password: `alfursan` → login kore Settings theke **change koro**
-3. **Project Settings > API** theke `Project URL` ar `anon public` key copy koro.
-4. `js/config.js` e boshao:
+1. Create a free project at [supabase.com](https://supabase.com).
+2. **SQL Editor** → paste all of `supabase/schema.sql` → **Run**.
+   Creates the tables, RLS, all RPCs, the Fri/Sat/Mon/Wed × 4:00–7:20 PM slots,
+   and one admin account: **owner / alfursan** — change it on first sign-in.
+3. **Project Settings → API** → copy `Project URL` and the `anon public` key into `js/config.js`:
 
 ```js
-window.AF_CONFIG = {
-  url: 'https://xxxxxxxx.supabase.co',
-  anonKey: 'eyJhbGciOi...'
-};
+window.AF_CONFIG = { url: 'https://xxxx.supabase.co', anonKey: 'eyJhbGciOi...' };
 ```
 
-5. Abar deploy koro. Ekhon student ra nijeder phone theke login korbe.
+4. Redeploy. Everything else — academy name, days, times, capacity, contact number,
+   timezone, currency, Telegram — is edited inside the app under **Settings**.
 
-### Security
+### Security model
 
-Prottekta table e RLS on ebong anon key diye **kono table e direct access nei**.
-Sob kaj hoy `security definer` RPC function diye — student shudhu nijer data pay,
-admin function gulo password check kore. Admin password 8+ character rakho.
+Every table has RLS on and the anon key can't touch any of them directly. All access
+goes through `security definer` functions:
 
-## 5. Notification (booking alert)
+- riders sign in with name + 4-digit PIN and get a **session token** — the PIN is never stored on the device
+- five wrong tries locks that name for 60 seconds
+- riders only ever receive their own record; other riders' PINs are never sent to the client
+- staff have named accounts with roles, and every change is written to an activity log
 
-Student jokhon kono slot **Book** kore:
+## Notifications
 
-- admin app e bell ⏰ badge + bottom nav e **Requests** count bare
-- admin app khola thakle (background tab o chole) browser notification ashe —
-  Settings > 🔔 *Notify me on new bookings* ekbar allow korte hobe
-- Requests tab theke ✓ approve / ✕ decline
+| Where | What arrives | When |
+| ----- | ------------ | ---- |
+| Rider's app | booking confirmed / declined, class cancelled, waitlist moved up, payment received | in-app, badge on the bell |
+| Console | new booking request | badge + browser notification **while the app is open** |
+| **Telegram** | every booking, cancellation and absence notice | **even with the app closed** |
 
-**App purapuri bondho thakleo alert chao?** `supabase/schema.sql` er nichey
-commented Telegram block ta ache — BotFather diye bot banao, token + chat id
-boshiye run koro. Tarpor protita booking direct Telegram e chole ashbe.
+Telegram setup (2 minutes, once):
 
----
+1. Telegram → **@BotFather** → `/newbot` → copy the token
+2. Send your bot any message, then open
+   `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `"chat":{"id": …}`
+3. App → **Settings → Telegram alerts** → paste both → **Save** → **Send test message**
+
+## What each role can do
+
+**Rider** — see cycle progress and classes left · next class with countdown, coach and horse ·
+book any date from a 5-week calendar with live seat counts · join a waitlist when full ·
+report "can't attend" · cancel (up to the cut-off) · month-grouped history · fees and receipts ·
+change own phone and PIN · install the app.
+
+**Owner / staff** — mark present / absent / clear with one tap and no scroll jump ·
+"all present" per slot · step through days with arrows · print the day sheet ·
+approve, decline (with a reason) or bulk-approve requests, each shown with the rider's
+balance, expiry and clashes · full rider detail: history, bookings, payments, share PIN
+over WhatsApp · add / pause / delete class times with coach and horse · cancel a single
+day or a single slot (everyone booked is told) · record fees · attention list for expiring
+courses, exhausted balances and unpaid fees · export **and restore** backups ·
+named staff accounts, password change, activity log.
 
 ## Structure
 
-```
+```text
 index.html              app shell
-css/styles.css          theme (dark chrome, matches the logo)
-js/config.js            Supabase keys + academy days/times   ← edit this
-js/i18n.js              English / বাংলা strings
-js/api.js               RPC layer
-js/demo.js              localStorage fallback (same contract)
-js/ui.js                DOM helpers, toast, modal, icons
-js/student.js           student portal
-js/admin.js             admin console
-js/app.js               login + boot + PWA install
-supabase/schema.sql     tables, RLS, RPC functions, seed data
-sw.js                   offline cache
+css/styles.css          light + dark themes, one token set
+js/config.js            Supabase keys + logo path      ← the only file you edit
+js/i18n.js              English / বাংলা
+js/api.js               RPC layer, session tokens, offline + error reporting
+js/demo.js              localStorage backend with the identical contract
+js/ui.js                router, dialogs, theme, timezone-aware dates
+js/student.js           rider app
+js/admin.js             academy console
+js/app.js               sign-in, boot, PWA
+supabase/schema.sql     tables, RLS, RPCs, seed, Telegram relay
+sw.js                   offline cache + "new version" prompt
+docs/UX-AUDIT.md        the 62-point audit this version was built from
 ```
 
 ## Courses
@@ -110,5 +111,27 @@ sw.js                   offline cache
 | Advanced | 16      | 2 months |
 | Private  | custom  | custom   |
 
-Admin protita student er total class, date, tag customize korte pare.
-Slot capacity default **3 jon**, per-slot change kora jay.
+Slot capacity defaults to 3 riders and is set per slot. Only **confirmed** bookings fill a
+seat — pending requests are shown separately so a slot never looks full before you decide.
+
+## Your logo
+
+The app ships with its own mark (`assets/icon.svg`). To use the academy logo, drop
+`assets/logo.png` in and point `js/config.js` at it:
+
+```js
+logo: 'assets/logo.png'
+```
+
+## Tests
+
+```bash
+cd tests && npm i jsdom
+node logic.mjs   # 67 checks on the RPC contract (no DOM)
+node ui.mjs      # 81 checks driving both apps through jsdom
+```
+
+`logic.mjs` runs every RPC against the demo backend — bookings, waitlist promotion,
+capacity, balances, expiry, day closures, payments, imports, lockouts, permissions.
+`ui.mjs` drives the real screens: sign-in, booking, back-button behaviour, attendance,
+approvals, rider editing, settings.

@@ -1,5 +1,14 @@
 # Al Fursan — UX Audit (v1.0)
 
+> **Status: all 62 findings were fixed in v2.0.0.** This document is kept as the record of
+> what was wrong and why each change was made. See `README.md` for how v2 works.
+>
+> Headline changes: name-picker sign-in with PIN recovery · rider gets notified back ·
+> calendar booking with waitlists and absence notices · three-state attendance that never
+> loses your scroll position · rider detail, bulk actions and day closures for the owner ·
+> fees · backup **restore** · light theme · working back button · Telegram alerts that
+> arrive with the app closed · session tokens instead of stored PINs.
+
 End-to-end review of the shipped PWA: every screen a rider or the owner touches, from the
 sign-in box to the attendance tap. **62 findings**, grouped by flow.
 

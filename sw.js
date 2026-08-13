@@ -1,54 +1,60 @@
-/* Al Fursan — service worker (app shell cache) */
-const CACHE = 'al-fursan-v1';
+/* Al Fursan — service worker */
+const VERSION = 'al-fursan-v2';
 const SHELL = [
-  './',
-  'index.html',
-  'css/styles.css',
-  'js/config.js',
-  'js/i18n.js',
-  'js/demo.js',
-  'js/api.js',
-  'js/ui.js',
-  'js/student.js',
-  'js/admin.js',
-  'js/app.js',
-  'manifest.webmanifest',
-  'assets/icon.svg',
-  'assets/icon-maskable.svg'
+  './', 'index.html', 'css/styles.css',
+  'js/config.js', 'js/i18n.js', 'js/demo.js', 'js/api.js', 'js/ui.js',
+  'js/student.js', 'js/admin.js', 'js/app.js',
+  'manifest.webmanifest', 'assets/icon.svg', 'assets/icon-maskable.svg'
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE)
-      .then(c => Promise.allSettled(SHELL.map(u => c.add(u))))
-      .then(() => self.skipWaiting())
-  );
+  e.waitUntil(caches.open(VERSION).then(c => Promise.allSettled(SHELL.map(u => c.add(u)))));
+  // no skipWaiting here: the page asks the user first, then posts SKIP_WAITING
+});
+
+self.addEventListener('message', e => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', e => {
   const req = e.request;
-  if (req.method !== 'GET') return;                       // never cache RPC calls
+  if (req.method !== 'GET') return;                      // never cache RPC calls
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;        // Supabase & fonts: straight to network
+  if (url.origin !== self.location.origin) return;       // Supabase & fonts go to network
 
+  // HTML: network first so a deploy is picked up on the next visit
+  const isDoc = req.mode === 'navigate' ||
+    (req.headers.get('accept') || '').includes('text/html');
+  if (isDoc) {
+    e.respondWith(
+      fetch(req).then(res => {
+        const copy = res.clone();
+        caches.open(VERSION).then(c => c.put(req, copy));
+        return res;
+      }).catch(() => caches.match(req).then(hit => hit || caches.match('index.html')))
+    );
+    return;
+  }
+
+  // assets: cache first, refreshed in the background
   e.respondWith(
     caches.match(req).then(hit => {
       const net = fetch(req).then(res => {
         if (res && res.ok) {
           const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(req, copy));
+          caches.open(VERSION).then(c => c.put(req, copy));
         }
         return res;
-      }).catch(() => hit || caches.match('index.html'));
-      return hit || net;                                  // cache-first, refresh in background
+      }).catch(() => hit);
+      return hit || net;
     })
   );
 });
@@ -57,6 +63,6 @@ self.addEventListener('notificationclick', e => {
   e.notification.close();
   e.waitUntil(clients.matchAll({ type: 'window' }).then(list => {
     for (const c of list) if ('focus' in c) return c.focus();
-    if (clients.openWindow) return clients.openWindow('./');
+    if (clients.openWindow) return clients.openWindow('./#/admin/requests');
   }));
 });

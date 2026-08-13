@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0c0f" />
-  <meta name="description" content="Al Fursan Equestrian Academy — student & class portal" />
+  <meta name="theme-color" content="#f2f3f6" />
+  <meta name="description" content="Al Fursan Equestrian Academy — rider portal and class management" />
   <title>Al Fursan Equestrian Academy</title>
 
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="assets/icon.svg" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Al Fursan" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -20,15 +20,17 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <div class="bg-grain" aria-hidden="true"></div>
   <div class="bg-glow" aria-hidden="true"></div>
 
-  <main id="app" class="app"></main>
+  <div class="shell">
+    <nav id="nav" class="nav" hidden aria-label="Sections"></nav>
+    <main id="app" class="app"></main>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <div id="modal" class="modal-wrap" hidden>
     <div class="modal-backdrop" data-close></div>
-    <div class="modal glass" role="dialog" aria-modal="true"></div>
+    <div class="modal" role="dialog" aria-modal="true"></div>
   </div>
 
   <script src="js/config.js"></script>

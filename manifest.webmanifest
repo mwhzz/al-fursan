@@ -1,18 +1,22 @@
 {
   "name": "Al Fursan Equestrian Academy",
   "short_name": "Al Fursan",
-  "description": "Student portal & class management for Al Fursan Equestrian Academy",
+  "description": "Rider portal and class management for Al Fursan Equestrian Academy",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#07090c",
-  "theme_color": "#07090c",
+  "background_color": "#0b0e13",
+  "theme_color": "#0b0e13",
   "lang": "en",
   "categories": ["education", "sports"],
   "icons": [
     { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "assets/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" },
-    { "src": "assets/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+    { "src": "assets/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Book a class", "url": "./#/student/book" },
+    { "name": "Today", "url": "./#/admin/today" },
+    { "name": "Requests", "url": "./#/admin/requests" }
   ]
 }
