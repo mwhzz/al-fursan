@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="chrome" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="28%" stop-color="#cfd6df"/>
+      <stop offset="52%" stop-color="#6f7883"/>
+      <stop offset="74%" stop-color="#d5dbe3"/>
+      <stop offset="100%" stop-color="#9aa3ae"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f2f5f9"/>
+      <stop offset="100%" stop-color="#aeb7c2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#07090c"/>
+  <g transform="translate(256 256) scale(0.68) translate(-256 -256)">
+    <circle cx="256" cy="262" r="196" fill="none" stroke="url(#chrome)" stroke-width="30"
+            stroke-linecap="round" stroke-dasharray="318 297" transform="rotate(-48 256 262)"/>
+    <g transform="translate(6,-4)">
+      <path fill="url(#ink)" d="M198 306c-2-18 2-32 12-44 10-12 8-26 4-44-4-18 0-36 12-50l6 22 14-18c16 14 30 14 50 6
+        20-8 36 4 42 22 8 26 2 58-12 88-14 30-20 56-20 84h-44c-4-28-16-46-36-54-12-5-24-2-28-12z"/>
+      <circle cx="240" cy="226" r="7" fill="#0b0e13"/>
+      <circle cx="207" cy="292" r="5" fill="#0b0e13" opacity=".85"/>
+    </g>
+  </g>
+</svg>
