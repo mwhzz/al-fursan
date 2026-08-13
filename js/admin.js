@@ -430,13 +430,15 @@
       actions: '<button class="btn ghost grow" data-close>' + U.esc(t('close')) + '</button>' +
         '<button class="btn danger" id="delBtn">' + U.esc(t('delete')) + '</button>',
       onMount(box) {
-        box.querySelector('#editBtn').addEventListener('click', () => { U.closeDialog(); studentForm(s); });
-        box.querySelector('#payBtn').addEventListener('click', () => { U.closeDialog(); paymentForm(s); });
+        // swap the dialog contents in place — closing first would let the browser's
+        // popstate land on the newly opened form and shut it again
+        box.querySelector('#editBtn').addEventListener('click', () => studentForm(s));
+        box.querySelector('#payBtn').addEventListener('click', () => paymentForm(s));
         box.querySelector('#archBtn').addEventListener('click', async () => {
           await API.saveStudent(Object.assign({}, s, { active: s.active === false }));
           U.closeDialog(); U.toast(t('saved'), 'ok'); reload({});
         });
-        box.querySelector('#delBtn').addEventListener('click', () => { U.closeDialog(); deleteRider(s, det); });
+        box.querySelector('#delBtn').addEventListener('click', () => deleteRider(s, det));
         box.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async () => {
           await API.savePayment({ id: b.dataset.paid, student_id: s.id, amount: b.dataset.amt,
             paid_on: U.todayISO() });
@@ -622,7 +624,6 @@
       onMount(box) {
         const del = box.querySelector('#sdel');
         if (del) del.addEventListener('click', async () => {
-          U.closeDialog();
           const yes = await U.confirm({ title: U.time12(s.time), message: t('areYouSure'), danger: true, okText: t('delete') });
           if (!yes) return;
           await API.deleteSlot(s.id); U.toast(t('deleted')); reload({});

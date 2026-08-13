@@ -224,9 +224,17 @@ ok('rider detail opens with history', !$('#modal').hidden && $('.modal').textCon
   $('.modal').textContent.slice(0, 200));
 ok('detail shows the PIN to share', $('.modal').textContent.includes('PIN'));
 ok('detail offers payments', !!$('.modal #payBtn'));
+
+// Regression: detail -> edit must SWAP the dialog, not close+reopen. Closing pushed a
+// history.back() whose popstate landed after the edit form opened and shut it again,
+// so "admin can't edit riders". Swapping must not touch history at all.
+const histBefore = w.history.length;
 $('.modal #editBtn').click();
-await wait(200);
+await wait(600);
 ok('edit form opens from detail', !!$('.modal #f_name'));
+ok('edit form stays open (no history bounce)', !$('#modal').hidden && !!$('.modal #f_name'));
+ok('swapping dialogs adds no history entry', w.history.length === histBefore,
+  histBefore + ' -> ' + w.history.length);
 $('.modal #genPin').click();
 await wait(50);
 ok('random PIN generator works', /^\d{4}$/.test($('.modal #f_pin').value), $('.modal #f_pin').value);

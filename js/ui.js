@@ -135,7 +135,15 @@
   }
 
   /* --------------------------------------------------------------- dialog --*/
-  let dlgOpen = false, pushedState = false, lastFocus = null, onCloseCb = null;
+  let dlgOpen = false, pushedState = false, lastFocus = null, onCloseCb = null, backPending = false;
+
+  // the backdrop lives outside .modal and is never re-rendered, so bind it once
+  function bindBackdrop() {
+    const bd = document.querySelector('#modal .modal-backdrop');
+    if (bd) bd.addEventListener('click', () => closeDialog());
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindBackdrop);
+  else bindBackdrop();
 
   function focusables(box) {
     return [...box.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select,textarea,[tabindex]:not([tabindex="-1"])')]
@@ -175,13 +183,18 @@
     wrap.hidden = false;
     document.body.classList.add('locked');
 
-    lastFocus = document.activeElement;
+    // Opening a dialog while one is already open SWAPS its contents. It must not
+    // touch history: pushing/popping between two dialogs makes the browser's
+    // popstate arrive after the new dialog opened and close it again.
+    const swapping = dlgOpen;
+    if (swapping && onCloseCb) { const prev = onCloseCb; onCloseCb = null; prev(); }
+    if (!swapping) lastFocus = document.activeElement;
     dlgOpen = true;
     onCloseCb = opts.onClose || null;
 
     if (!pushedState) { history.pushState({ afDialog: 1 }, '', location.href); pushedState = true; }
 
-    wrap.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => closeDialog()));
+    box.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => closeDialog()));
     document.addEventListener('keydown', trap, true);
 
     if (opts.onMount) opts.onMount(box);
@@ -203,12 +216,15 @@
     if (lastFocus && lastFocus.focus) { try { lastFocus.focus(); } catch (e) {} }
     lastFocus = null;
     const cb = onCloseCb; onCloseCb = null;
-    if (!fromPop && pushedState) { pushedState = false; history.back(); }
+    if (!fromPop && pushedState) { pushedState = false; backPending = true; history.back(); }
     else pushedState = false;
     if (cb) cb();
   }
 
   window.addEventListener('popstate', () => {
+    // our own history.back() from closeDialog: already handled, and it must not
+    // close whatever dialog may have opened in the meantime
+    if (backPending) { backPending = false; return; }
     if (dlgOpen) { closeDialog(true); return; }
     pushedState = false;
     router.emit();
