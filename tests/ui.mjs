@@ -179,14 +179,18 @@ const absentBtn = row.querySelector('[data-mark="absent"]');
 ok('both present and absent are offered', !!presentBtn && !!absentBtn);
 presentBtn.click();
 await wait(60);
-ok('present applies immediately (optimistic)', row.classList.contains('on'));
+ok('present applies immediately (optimistic)', row.dataset.state === 'present', row.dataset.state);
 await wait(400);
 absentBtn.click();
 await wait(400);
-ok('absent can be recorded', absentBtn.getAttribute('aria-pressed') === 'true' && !row.classList.contains('on'));
+ok('absent can be recorded', absentBtn.getAttribute('aria-pressed') === 'true' && row.dataset.state === 'absent',
+  row.dataset.state);
 absentBtn.click();
 await wait(400);
-ok('tapping again clears the mark', absentBtn.getAttribute('aria-pressed') === 'false');
+ok('tapping again clears the mark',
+  absentBtn.getAttribute('aria-pressed') === 'false' && row.dataset.state === 'none', row.dataset.state);
+
+ok('rider avatars carry the course hue', $$('.avatar[data-course]').length > 0);
 
 const beforeHtml = $('[data-slotcard]') ? $('[data-slotcard]').dataset.slotcard : '';
 $('[data-allpresent]').click();
@@ -207,6 +211,10 @@ $('.modal #go').click();
 await wait(700);
 ok('decline recorded with reason', txt().includes('Not confirmed'), txt().slice(0, 220));
 ok('a declined request can be undone', !!$('[data-undo]'));
+// colour must never be the only signal: every status badge carries an icon
+ok('status colour is paired with an icon',
+  $$('.badge.solid').length > 0 && $$('.badge.solid').every(b => !!b.querySelector('svg')),
+  $$('.badge.solid').length);
 
 /* ---- riders ---- */
 $('[data-tab="students"]').click();

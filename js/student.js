@@ -90,7 +90,7 @@
         ? '<div class="stat warn"><b>' + n(dl) + '</b><span>' + U.esc(t('validTill')) + ' · ' + U.esc(U.dateLabel(s.end_date)) + '</span></div>'
         : '<div class="stat"><b>' + (dl == null ? '—' : n(dl)) + '</b><span>' + U.esc(s.end_date ? U.dateLabel(s.end_date) : t('validTill')) + '</span></div>';
 
-    return '<section class="panel view">' +
+    return '<section class="panel lead view" data-state="' + (expired ? 'closed' : left === 0 ? 'done' : 'info') + '">' +
       '<div class="hero">' +
         U.ring(pct, '<b>' + n(doneCycle) + '<span class="dim" style="font-size:.95rem">/' + n(s.total_classes) + '</span></b>' +
           '<span class="tiny dim">' + U.esc(t('thisMonth')) + '</span>') +
@@ -104,8 +104,9 @@
         '</div>' +
       '</div>' +
       '<div class="grid-3" style="margin-top:16px">' +
-        '<div class="stat"><b>' + n(s.done) + '</b><span>' + U.esc(t('completed')) + '</span></div>' +
-        '<div class="stat"><b>' + n(left) + '</b><span>' + U.esc(t('remaining')) + '</span></div>' +
+        '<div class="stat ok"><b>' + n(s.done) + '</b><span>' + U.esc(t('completed')) + '</span></div>' +
+        '<div class="stat' + (left === 0 ? ' bad' : left <= 2 ? ' warn' : '') + '"><b>' + n(left) +
+          '</b><span>' + U.esc(t('remaining')) + '</span></div>' +
         validTile +
       '</div>' +
       (expired || (dl != null && dl <= 7)
@@ -147,11 +148,12 @@
     return '<section class="panel view"><div class="upper" style="margin-bottom:10px">' +
       U.esc(t('myBookings')) + '</div><div class="list">' +
       list.map(b =>
-        '<div class="item"><span class="avatar sm muted">' + U.esc(U.dayName(b.day, true).slice(0, 2)) + '</span>' +
-        '<div class="grow"><div style="font-weight:650">' + U.esc(U.time12(b.time)) + ' · ' + U.esc(U.dateLabel(b.date)) + '</div>' +
+        '<div class="item" data-state="' + U.esc(b.status) + '">' +
+        '<span class="avatar sm muted">' + U.esc(U.dayName(b.day, true).slice(0, 2)) + '</span>' +
+        '<div class="grow"><div style="font-weight:700">' + U.esc(U.time12(b.time)) + ' · ' + U.esc(U.dateLabel(b.date)) + '</div>' +
         '<div class="tiny dim">' + U.esc(b.status === 'pending' ? t('pendingHint', { n: n(S().reply_hours || 24) })
           : b.status === 'waitlist' ? t('waitlist') : U.dateFull(b.date)) + '</div></div>' +
-        U.badge(t(b.status), U.statusKind(b.status)) +
+        U.statusBadge(b.status) +
         '<button class="btn icon sm ghost" data-cancel="' + U.esc(b.id) + '" aria-label="' +
         U.esc(t('cancelBooking')) + '">' + U.icon('x') + '</button></div>').join('') +
       '</div></section>';
@@ -188,13 +190,17 @@
         if (isClosed(s.id, d)) return;
         closedAll = false;
         const seat = seatOf(s.id, d);
-        if (seat.taken < (s.capacity || 3)) free++;
+        free += Math.max(0, (s.capacity || 3) - seat.taken);
       });
+      // the day itself is colour-coded: seats free / nearly full / full / cancelled
+      const state = !has ? '' : closedAll ? 'closed' : free === 0 ? 'full' : free <= 2 ? 'tight' : 'free';
       const label = U.parseISO(d).getDate();
       html += '<button type="button" data-date="' + d + '" ' + (has ? '' : 'disabled ') +
-        'aria-pressed="' + (d === pickedDate) + '" aria-label="' + U.esc(U.dateFull(d)) + '">' +
+        (state ? 'data-state="' + state + '" ' : '') + (d === today ? 'class="today" ' : '') +
+        'aria-pressed="' + (d === pickedDate) + '" aria-label="' + U.esc(U.dateFull(d)) +
+        (has ? ' — ' + (closedAll ? t('classClosed') : t('seatsLeft', { n: free })) : '') + '">' +
         '<span>' + n(label) + '</span>' +
-        (has ? '<span class="pips"><span class="pip' + (free && !closedAll ? '' : ' none') + '"></span></span>' : '') +
+        (has && !closedAll ? '<span class="free">' + n(free) + '</span>' : '') +
         '</button>';
     }
     return html + '</div>';
@@ -213,7 +219,7 @@
     const freeSeats = cap - seat.taken;
     let action = '';
     if (closure) action = '';
-    else if (mine) action = U.badge(t('youAreIn'), 'ok');
+    else if (mine) action = U.badge(t('youAreIn'), 'ok', true);
     else if (booked) action = '<button class="btn sm ghost" data-cancel="' + U.esc(booked.id) + '">' +
       U.esc(t('cancelBooking')) + '</button>';
     else if (freeSeats > 0) action = '<button class="btn sm primary" data-book="' + U.esc(s.id) +
@@ -224,18 +230,22 @@
     const meta = [s.coach ? t('coach') + ': ' + s.coach : '', s.horse ? t('horse') + ': ' + s.horse : '']
       .filter(Boolean).join(' · ');
 
-    return '<div class="slot' + (mine || booked ? ' mine' : '') + (closure ? ' closed' : '') + '">' +
+    const state = closure ? 'closed' : mine || (booked && booked.status === 'approved') ? 'approved'
+      : booked ? booked.status : freeSeats > 0 ? 'none' : 'full';
+
+    return '<div class="slot' + (mine || booked ? ' mine' : '') + (closure ? ' closed' : '') +
+      '" data-state="' + state + '">' +
       '<div class="spread"><div><div class="slot-time">' + U.esc(U.time12(s.time)) + '</div>' +
       (meta ? '<div class="tiny dim">' + U.esc(meta) + '</div>' : '') + '</div>' +
       '<span class="seats" aria-hidden="true">' + seats + '</span></div>' +
       '<div class="row wrap" style="margin-top:10px;gap:8px">' +
         (closure
-          ? U.badge(closure.reason ? t('closedReason', { r: closure.reason }) : t('classClosed'), 'bad')
-          : U.badge(t('confirmedSeats', { n: n(seat.taken) }), seat.taken >= cap ? 'bad' : 'ok') +
+          ? U.badge(closure.reason ? t('closedReason', { r: closure.reason }) : t('classClosed'), 'bad', true)
+          : U.badge(t('confirmedSeats', { n: n(seat.taken) }), seat.taken >= cap ? 'bad' : 'ok', true) +
             (seat.pending ? U.badge(t('waitingSeats', { n: n(seat.pending) }), 'wait') : '') +
             (freeSeats > 0 ? U.badge(freeSeats === 1 ? t('oneSeatLeft') : t('seatsLeft', { n: n(freeSeats) }), 'plain')
-                           : U.badge(t('full'), 'bad'))) +
-        (booked ? U.badge(t(booked.status), U.statusKind(booked.status)) : '') +
+                           : U.badge(t('full'), 'bad', true))) +
+        (booked ? U.statusBadge(booked.status) : '') +
         '<span class="grow"></span>' + action +
       '</div></div>';
   }
@@ -282,13 +292,14 @@
       const present = rows.filter(r => r.status === 'present').length;
       return '<section class="panel view">' +
         '<div class="spread" style="margin-bottom:10px"><h3>' + U.esc(label) + '</h3>' +
-        U.badge(n(present) + ' ' + t('present'), 'ok') + '</div>' +
+        U.badge(n(present) + ' ' + t('present'), 'ok', true) + '</div>' +
         '<div class="list">' + rows.map(r =>
-          '<div class="item"><span class="avatar sm ' + (r.status === 'present' ? 'ok' : 'muted') + '">' +
-          (r.status === 'present' ? '✓' : r.status === 'absent' ? '–' : '↻') + '</span>' +
-          '<div class="grow"><div style="font-weight:600">' + U.esc(U.dateFull(r.date)) + '</div>' +
+          '<div class="item" data-state="' + U.esc(r.status) + '">' +
+          '<span class="avatar sm ' + (r.status === 'present' ? 'ok' : r.status === 'absent' ? 'bad' : 'muted') + '">' +
+          U.icon(U.statusIcon(r.status), 'ic') + '</span>' +
+          '<div class="grow"><div style="font-weight:650">' + U.esc(U.dateFull(r.date)) + '</div>' +
           '<div class="tiny dim">' + U.esc(r.time ? U.time12(r.time) : '') + '</div></div>' +
-          U.badge(t(r.status), U.statusKind(r.status)) + '</div>').join('') +
+          U.statusBadge(r.status) + '</div>').join('') +
         '</div></section>';
     }).join('');
 
@@ -327,7 +338,7 @@
           '<div class="grow"><div style="font-weight:650">' + U.esc(U.money(p.amount, cur())) + '</div>' +
           '<div class="tiny dim">' + U.esc(p.paid_on ? t('paidOn', { d: U.dateLabel(p.paid_on) })
             : p.due_date ? t('dueOn', { d: U.dateLabel(p.due_date) }) : '') + '</div></div>' +
-          U.badge(p.paid_on ? t('paid') : t('unpaid'), p.paid_on ? 'ok' : 'wait') + '</div>').join('') + '</div>'
+          U.badge(p.paid_on ? t('paid') : t('unpaid'), p.paid_on ? 'ok' : 'wait', true) + '</div>').join('') + '</div>'
           : '<p class="small dim">' + U.esc(t('noFees')) + '</p>') +
       '</section>' +
 

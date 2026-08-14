@@ -128,10 +128,11 @@
     const stu = byId(x.id) || x;
     const rec = attOf(x.id, date, slot.time);
     const st = rec ? rec.status : 'none';
-    return '<div class="item' + (st === 'present' ? ' on' : '') + '" data-row="' + U.esc(x.id) + '" ' +
+    return '<div class="item" data-state="' + st + '" data-row="' + U.esc(x.id) + '" ' +
       'data-slot="' + U.esc(slot.id) + '">' +
-      '<span class="avatar' + (st === 'present' ? ' ok' : ' muted') + '">' + U.esc(U.initials(x.name)) + '</span>' +
-      '<div class="grow"><div style="font-weight:650">' + U.esc(x.name) +
+      U.avatar(x.name, st === 'present' ? 'ok' : st === 'absent' ? 'bad' : '',
+        st === 'none' ? (stu.course || 'basic') : null) +
+      '<div class="grow"><div style="font-weight:700">' + U.esc(x.name) +
         (x.booked ? ' ' + U.badge(t('approved'), 'info') : '') + '</div>' +
       '<div class="tiny dim">' + n(stu.done || 0) + '/' + n(stu.total_classes || 0) + ' · ' +
         U.esc(t(stu.course || 'basic')) + (rec && rec.note ? ' · ' + U.esc(rec.note) : '') + '</div></div>' +
@@ -151,7 +152,8 @@
     const st = D.stats || {};
     const dayClosure = (D.closures || []).find(c => c.date === datePick && !c.slot_id);
 
-    const head = '<section class="panel view">' +
+    const head = '<section class="panel lead view" data-state="' +
+      (datePick === U.todayISO() ? 'today' : 'info') + '">' +
       '<div class="spread">' +
         '<button class="btn icon ghost" id="prevDay" aria-label="' + U.esc(t('back')) + '">' + U.icon('left') + '</button>' +
         '<div class="center grow"><div style="font-weight:700;font-size:1.05rem">' + U.esc(U.dateFull(datePick)) + '</div>' +
@@ -187,7 +189,12 @@
       for (let i = 0; i < cap; i++) seats += '<span class="seat' + (i < people.length ? ' on' : '') + '"></span>';
       const meta = [s.coach, s.horse].filter(Boolean).join(' · ');
 
-      return '<section class="panel view" data-slotcard="' + U.esc(s.id) + '">' +
+      // the card's stripe summarises the slot: all marked, part marked, nothing yet
+      const marked = people.filter(x => attOf(x.id, datePick, s.time)).length;
+      const state = closure ? 'closed' : !people.length ? 'none'
+        : marked === people.length ? 'present' : marked ? 'partial' : 'none';
+
+      return '<section class="panel view" data-state="' + state + '" data-slotcard="' + U.esc(s.id) + '">' +
         '<div class="spread"><div><div class="slot-time">' + U.esc(U.time12(s.time)) + '</div>' +
         (meta ? '<div class="tiny dim">' + U.esc(meta) + '</div>' : '') + '</div>' +
         '<div class="row" style="gap:8px"><span class="tiny dim num">' + n(people.length) + '/' + n(cap) + '</span>' +
@@ -219,6 +226,7 @@
 
     const prev = rec ? rec.status : 'none';
     applyRow(rowEl, next);
+    U.buzz(next === 'none' ? 8 : 14);
     if (next === 'none') { if (rec) delete attIndex[attKey(sid, datePick, slot.time)]; }
     else attIndex[attKey(sid, datePick, slot.time)] = Object.assign(rec || {
       id: 'tmp', student_id: sid, date: datePick, time: slot.time }, { status: next });
@@ -241,10 +249,12 @@
   }
 
   function applyRow(rowEl, status) {
-    rowEl.classList.toggle('on', status === 'present');
+    rowEl.dataset.state = status;
+    rowEl.classList.remove('pulse');
+    void rowEl.offsetWidth;                       // restart the animation
+    rowEl.classList.add('pulse');
     const av = rowEl.querySelector('.avatar');
-    av.classList.toggle('ok', status === 'present');
-    av.classList.toggle('muted', status !== 'present');
+    av.className = 'avatar' + (status === 'present' ? ' ok' : status === 'absent' ? ' bad' : '');
     const [pBtn, aBtn] = rowEl.querySelectorAll('[data-mark]');
     pBtn.classList.toggle('ok', status === 'present');
     pBtn.classList.toggle('ghost', status !== 'present');
@@ -262,24 +272,25 @@
     const conflict = (D.bookings || []).some(o => o.id !== b.id && o.student_id === b.student_id &&
       o.date === b.date && ['approved', 'pending'].includes(o.status));
     const flags = [
-      left <= 0 ? U.badge(t('noBalance'), 'bad') : U.badge(t('classesLeftShort', { n: n(left) }), 'plain'),
-      expired ? U.badge(t('expired'), 'bad') : '',
-      conflict ? U.badge(t('conflict'), 'wait') : '',
+      left <= 0 ? U.badge(t('noBalance'), 'bad', true) : U.badge(t('classesLeftShort', { n: n(left) }),
+        left <= 2 ? 'wait' : 'ok'),
+      expired ? U.badge(t('expired'), 'bad', true) : '',
+      conflict ? U.badge(t('conflict'), 'wait', true) : '',
       b.status === 'waitlist' ? U.badge(t('waitlist'), 'wait') : ''
     ].filter(Boolean).join('');
 
-    return '<div class="item' + (picked[b.id] ? ' picked' : '') + '">' +
+    return '<div class="item' + (picked[b.id] ? ' picked' : '') + '" data-state="' + U.esc(b.status) + '">' +
       (selectable ? '<label class="check" style="padding:0"><input type="checkbox" data-pick="' + U.esc(b.id) +
         '" ' + (picked[b.id] ? 'checked' : '') + ' aria-label="' + U.esc(b.student) + '"></label>' : '') +
-      '<span class="avatar">' + U.esc(U.initials(b.student)) + '</span>' +
-      '<div class="grow"><div style="font-weight:650">' + U.esc(b.student) + '</div>' +
+      U.avatar(b.student, '', (s.course || 'basic')) +
+      '<div class="grow"><div style="font-weight:700">' + U.esc(b.student) + '</div>' +
       '<div class="tiny dim">' + U.esc(U.dateFull(b.date)) + ' · ' + U.esc(U.time12(b.time)) + '</div>' +
       '<div class="row wrap" style="gap:4px;margin-top:5px">' + flags + '</div></div>' +
       (selectable
         ? '<div class="row" style="gap:6px">' +
           '<button class="btn icon sm ghost" data-decline="' + U.esc(b.id) + '" aria-label="' + U.esc(t('decline')) + '">' + U.icon('x') + '</button>' +
           '<button class="btn icon sm primary" data-approve="' + U.esc(b.id) + '" aria-label="' + U.esc(t('approve')) + '">' + U.icon('check') + '</button></div>'
-        : U.badge(t(b.status), U.statusKind(b.status)) +
+        : U.statusBadge(b.status) +
           (b.status === 'declined' ? '<button class="btn sm ghost" data-undo="' + U.esc(b.id) + '">' + U.esc(t('undo')) + '</button>' : '')) +
       '</div>';
   }
@@ -355,14 +366,16 @@
       (list.length ? '<div class="list">' + list.map(s => {
         const left = balanceOf(s);
         const pct = s.total_classes ? Math.min(1, (s.done || 0) / s.total_classes) : 0;
-        return '<button class="item" data-open="' + U.esc(s.id) + '">' +
-          '<span class="avatar' + (s.active === false ? ' muted' : '') + '">' + U.esc(U.initials(s.name)) + '</span>' +
+        const tone = left === 0 ? 'bad' : left <= 2 ? 'warn' : 'ok';
+        return '<button class="item" data-open="' + U.esc(s.id) + '"' +
+          (s.active === false ? ' data-state="archived"' : s.unpaid > 0 ? ' data-state="due"' : '') + '>' +
+          U.avatar(s.name, s.active === false ? 'muted' : '', s.active === false ? null : s.course) +
           '<span class="grow" style="display:grid;gap:5px">' +
             '<span class="spread"><b>' + U.esc(s.name) + '</b>' + U.courseBadge(s.course) + '</span>' +
-            '<span class="progress"><i style="width:' + (pct * 100).toFixed(0) + '%"></i></span>' +
+            '<span class="progress ' + tone + '"><i style="width:' + (pct * 100).toFixed(0) + '%"></i></span>' +
             '<span class="tiny dim">' + n(s.done || 0) + '/' + n(s.total_classes || 0) + ' · ' +
-              U.esc(t('classesLeftShort', { n: n(left) })) +
-              (s.unpaid > 0 ? ' · ' + U.esc(t('due')) + ' ' + U.esc(U.money(s.unpaid, cur())) : '') + '</span>' +
+              '<b class="' + U.qClass(left) + '">' + U.esc(t('classesLeftShort', { n: n(left) })) + '</b>' +
+              (s.unpaid > 0 ? ' · <b class="q-low">' + U.esc(t('due')) + ' ' + U.esc(U.money(s.unpaid, cur())) + '</b>' : '') + '</span>' +
           '</span></button>';
       }).join('') + '</div>'
         : U.empty(t('noStudents'), '<button class="btn primary" id="addStudent2">' + U.esc(t('addFirst')) + '</button>')) +
@@ -384,9 +397,9 @@
       title: s.name,
       body:
         '<div class="grid-3">' +
-          '<div class="stat"><b>' + n(s.done) + '</b><span>' + U.esc(t('completed')) + '</span></div>' +
-          '<div class="stat' + (left === 0 ? ' warn' : '') + '"><b>' + n(left) + '</b><span>' + U.esc(t('remaining')) + '</span></div>' +
-          '<div class="stat' + (s.unpaid > 0 ? ' bad' : '') + '"><b>' + U.esc(U.money(s.unpaid, cur())) + '</b><span>' + U.esc(t('due')) + '</span></div>' +
+          '<div class="stat ok"><b>' + n(s.done) + '</b><span>' + U.esc(t('completed')) + '</span></div>' +
+          '<div class="stat' + (left === 0 ? ' bad' : left <= 2 ? ' warn' : '') + '"><b>' + n(left) + '</b><span>' + U.esc(t('remaining')) + '</span></div>' +
+          '<div class="stat' + (s.unpaid > 0 ? ' bad' : ' ok') + '"><b>' + U.esc(U.money(s.unpaid, cur())) + '</b><span>' + U.esc(t('due')) + '</span></div>' +
         '</div>' +
         '<div class="row wrap">' + U.courseBadge(s.course) +
           (s.tags || []).map(x => U.badge(x, 'plain')).join('') +
@@ -403,11 +416,12 @@
 
         (det.payments.length ? '<div><div class="upper" style="margin:6px 0">' + U.esc(t('payments')) + '</div>' +
           '<div class="list">' + det.payments.map(p =>
-            '<div class="item"><span class="avatar sm ' + (p.paid_on ? 'ok' : 'muted') + '">' + U.icon('cash') + '</span>' +
-            '<div class="grow"><div style="font-weight:650">' + U.esc(U.money(p.amount, cur())) + '</div>' +
+            '<div class="item" data-state="' + (p.paid_on ? 'paid' : 'due') + '">' +
+            '<span class="avatar sm ' + (p.paid_on ? 'ok' : 'muted') + '">' + U.icon('cash') + '</span>' +
+            '<div class="grow"><div style="font-weight:700">' + U.esc(U.money(p.amount, cur())) + '</div>' +
             '<div class="tiny dim">' + U.esc(p.paid_on ? t('paidOn', { d: U.dateLabel(p.paid_on) })
               : p.due_date ? t('dueOn', { d: U.dateLabel(p.due_date) }) : '') + '</div></div>' +
-            (p.paid_on ? U.badge(t('paid'), 'ok')
+            (p.paid_on ? U.badge(t('paid'), 'ok', true)
               : '<button class="btn sm primary" data-paid="' + U.esc(p.id) + '" data-amt="' + U.esc(p.amount) +
                 '">' + U.esc(t('markPaid')) + '</button>') +
             '<button class="btn icon sm ghost" data-delpay="' + U.esc(p.id) + '" aria-label="' + U.esc(t('delete')) + '">' +
@@ -415,11 +429,12 @@
 
         '<div><div class="upper" style="margin:6px 0">' + U.esc(t('history')) + '</div>' +
         (det.attendance.length ? '<div class="list">' + det.attendance.slice(0, 25).map(r =>
-          '<div class="item"><span class="avatar sm ' + (r.status === 'present' ? 'ok' : 'muted') + '">' +
-          (r.status === 'present' ? '✓' : r.status === 'absent' ? '–' : '↻') + '</span>' +
-          '<div class="grow"><div style="font-weight:600">' + U.esc(U.dateFull(r.date)) + '</div>' +
+          '<div class="item" data-state="' + U.esc(r.status) + '">' +
+          '<span class="avatar sm ' + (r.status === 'present' ? 'ok' : r.status === 'absent' ? 'bad' : 'muted') + '">' +
+          U.icon(U.statusIcon(r.status), 'ic') + '</span>' +
+          '<div class="grow"><div style="font-weight:650">' + U.esc(U.dateFull(r.date)) + '</div>' +
           '<div class="tiny dim">' + U.esc(r.time ? U.time12(r.time) : '') + (r.note ? ' · ' + U.esc(r.note) : '') + '</div></div>' +
-          U.badge(t(r.status), U.statusKind(r.status)) + '</div>').join('') + '</div>'
+          U.statusBadge(r.status) + '</div>').join('') + '</div>'
           : '<p class="small dim">' + U.esc(t('noHistory')) + '</p>') + '</div>' +
 
         (det.bookings.length ? '<div><div class="upper" style="margin:6px 0">' + U.esc(t('myBookings')) + '</div>' +

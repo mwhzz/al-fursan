@@ -128,10 +128,17 @@
   function toast(msg, kind) {
     const el = document.getElementById('toast');
     if (!el) return;
-    el.textContent = msg;
+    const mark = kind === 'ok' ? 'check' : kind === 'err' ? 'alert' : 'info';
+    el.innerHTML = icon(mark) + '<span></span>';
+    el.querySelector('span').textContent = msg;
     el.className = 'toast show ' + (kind || '');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { el.className = 'toast ' + (kind || ''); }, kind === 'err' ? 4200 : 2600);
+  }
+
+  /** short vibration for a confirmed physical action (no-op where unsupported) */
+  function buzz(ms) {
+    try { if (navigator.vibrate) navigator.vibrate(ms || 12); } catch (e) {}
   }
 
   /* --------------------------------------------------------------- dialog --*/
@@ -293,7 +300,9 @@
     up: '<svg viewBox="0 0 24 24"><path d="M12 21V8m0 0 5 5M12 8 7 13M4 3h16"/></svg>',
     user: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>',
     empty: '<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="14" rx="2"/><path d="M3 11h18M9 6V3h6v3"/></svg>',
-    wifi: '<svg viewBox="0 0 24 24"><path d="M2 8.5a15 15 0 0 1 20 0M5.5 12a10 10 0 0 1 13 0M9 15.5a5 5 0 0 1 6 0M12 19.5v.1"/></svg>'
+    wifi: '<svg viewBox="0 0 24 24"><path d="M2 8.5a15 15 0 0 1 20 0M5.5 12a10 10 0 0 1 13 0M9 15.5a5 5 0 0 1 6 0M12 19.5v.1"/></svg>',
+    info: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.1"/></svg>',
+    seat: '<svg viewBox="0 0 24 24"><path d="M6 4h12v7a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4zM8 15v5M16 15v5"/></svg>'
   };
 
   const icon = (k, cls) => (ICON[k] || '').replace('<svg', '<svg class="' + (cls || 'ic') + '" aria-hidden="true"');
@@ -303,9 +312,19 @@
     return '<img src="' + esc(src) + '" alt="" class="' + cls + '">';
   }
 
-  function avatar(name, cls) {
-    return '<span class="avatar ' + (cls || '') + '" aria-hidden="true">' + esc(initials(name)) + '</span>';
+  function avatar(name, cls, course) {
+    return '<span class="avatar ' + (cls || '') + '"' +
+      (course ? ' data-course="' + esc(course) + '"' : '') +
+      ' aria-hidden="true">' + esc(initials(name)) + '</span>';
   }
+
+  /** colour a quantity: plenty / running low / none left */
+  function qClass(value, lowAt) {
+    const v = Number(value) || 0;
+    if (v <= 0) return 'q-none';
+    return v <= (lowAt == null ? 2 : lowAt) ? 'q-low' : 'q-ok';
+  }
+  const qty = (value, lowAt) => '<b class="' + qClass(value, lowAt) + '">' + n(value) + '</b>';
 
   function ring(pct, centerHtml) {
     const r = 52, circ = 2 * Math.PI * r;
@@ -326,8 +345,19 @@
     });
   }
 
-  const badge = (text, kind) => '<span class="badge ' + (kind || '') + '">' + esc(text) + '</span>';
+  /** badge(text, kind, solid) — solid = a fact, soft = a label */
+  const badge = (text, kind, solid) =>
+    '<span class="badge ' + (kind || '') + (solid ? ' solid' : '') + '">' + esc(text) + '</span>';
   const courseBadge = c => badge(t(c || 'basic'), c || 'basic');
+  /** a status badge always carries an icon too, so colour is never the only signal */
+  const statusBadge = s => '<span class="badge ' + statusKind(s) + ' solid">' +
+    icon(statusIcon(s)) + esc(t(s)) + '</span>';
+  const statusIcon = s => ({
+    present: 'check', approved: 'check', paid: 'check',
+    pending: 'clock', waitlist: 'clock',
+    absent: 'x', declined: 'x', cancelled: 'x', expired: 'x',
+    makeup: 'right'
+  })[s] || 'info';
 
   const statusKind = s => ({
     approved: 'ok', present: 'ok', pending: 'wait', waitlist: 'wait',
@@ -361,8 +391,8 @@
   window.UI = {
     app, esc, DAY, dayKey, dayName, setTZ, todayISO, nowParts, addDaysISO, dowOf, parseISO,
     dateLabel, dateFull, time12, relDate, daysUntil, minutesUntil, initials, money,
-    theme, router, toast, dialog, closeDialog, confirm: confirmDialog,
-    paint, loading, ICON, icon, logo, avatar, ring, animateRings,
-    badge, courseBadge, statusKind, empty, field, on
+    theme, router, toast, buzz, dialog, closeDialog, confirm: confirmDialog,
+    paint, loading, ICON, icon, logo, avatar, ring, animateRings, qClass, qty,
+    badge, courseBadge, statusBadge, statusIcon, statusKind, empty, field, on
   };
 })();
