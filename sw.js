@@ -2,7 +2,7 @@
 const VERSION = 'al-fursan-v2';
 const SHELL = [
   './', 'index.html', 'css/styles.css',
-  'js/config.js', 'js/i18n.js', 'js/demo.js', 'js/api.js', 'js/ui.js', 'js/guide.js',
+  'js/config.js', 'js/i18n.js', 'js/store.js', 'js/demo.js', 'js/api.js', 'js/ui.js', 'js/guide.js',
   'js/student.js', 'js/admin.js', 'js/app.js',
   'manifest.webmanifest', 'assets/icon.svg', 'assets/icon-maskable.svg'
 ];

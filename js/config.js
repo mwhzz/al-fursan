@@ -13,12 +13,23 @@
    jay, redeploy chhara.
 -------------------------------------------------------------------------*/
 window.AF_CONFIG = {
-  url: '',      // e.g. 'https://abcdefgh.supabase.co'
-  anonKey: '',  // e.g. 'eyJhbGciOi...'
+  /* Where the data lives.
+       'auto'     try the Netlify function, fall back to this browser  (default)
+       'netlify'  always the Netlify function at /api/rpc
+       'supabase' use the url + anonKey below
+       'demo'     this browser only, nothing shared
+     On Netlify nothing needs changing: the site ships with its own backend
+     (netlify/functions/api.js + Netlify Blobs), so riders on their own phones
+     all see the same data. */
+  backend: 'auto',
+  api: '/api/rpc',
+
+  url: '',      // Supabase only — e.g. 'https://abcdefgh.supabase.co'
+  anonKey: '',  // Supabase only — e.g. 'eyJhbGciOi...'
 
   // Logo file. Default mark ta assets/icon.svg — nijer logo dile
   // assets/logo.png rekhe niche path ta bodle dao.
   logo: 'assets/icon.svg',
 
-  version: '2.1.0'
+  version: '2.2.0'
 };

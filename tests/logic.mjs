@@ -12,7 +12,7 @@ const localStorage = {
 const ctx = { console, crypto, localStorage, setTimeout, Date, Math, JSON, Promise, Number, String, Object, Array, Intl };
 ctx.window = ctx;
 vm.createContext(ctx);
-for (const f of ['js/demo.js']) vm.runInContext(fs.readFileSync(dir + f, 'utf8'), ctx, { filename: f });
+for (const f of ['js/store.js', 'js/demo.js']) vm.runInContext(fs.readFileSync(dir + f, 'utf8'), ctx, { filename: f });
 
 const call = (fn, args) => ctx.DEMO.call(fn, args);
 let pass = 0, fail = 0;
@@ -167,8 +167,10 @@ await call('admin_mark', { p_token: A, p_student: zid, p_date: today, p_time: '1
 ov = await call('admin_session', { p_token: A });
 ok('clearing a mark removes the record', !ov.attendance.some(a => a.student_id === zid && a.date === today && a.time === '17:40'));
 
+const wedRoster = (sess.schedule.find(s => s.id === wedSlot.id).students || []).length;
 const bulk = await call('admin_mark_bulk', { p_token: A, p_slot: wedSlot.id, p_date: nextDow(3), p_status: 'present' });
-ok('bulk mark all present', bulk.ok && bulk.count === 3, bulk);
+ok('bulk mark covers everyone in the slot', bulk.ok && bulk.count === wedRoster,
+  { count: bulk.count, roster: wedRoster });
 
 /* ------------------------------------------------------- day closure */
 const cd = await call('admin_close_day', { p_token: A, p_date: monDate, p_slot: null, p_reason: 'Rain' });

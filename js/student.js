@@ -399,6 +399,7 @@
     const items = [['overview', 'home'], ['book', 'calendar'], ['history', 'clock'], ['profile', 'user']];
     const el = document.getElementById('nav');
     el.hidden = false;
+    document.querySelector('.shell').classList.add('signed-in');
     el.innerHTML = items.map(([k, ic]) =>
       '<button data-tab="' + k + '" ' + (tab === k ? 'aria-current="page"' : '') + '>' +
       U.icon(ic) + '<span>' + U.esc(t(k)) + '</span></button>').join('');

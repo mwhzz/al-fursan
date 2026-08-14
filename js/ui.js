@@ -190,7 +190,10 @@
     box.innerHTML =
       '<div class="modal-head"><h2 id="' + id + '">' + esc(opts.title || '') + '</h2>' +
       (dlgLocked ? '' :
-        '<button class="btn icon ghost" data-close aria-label="' + esc(t('close')) + '">' + ICON.x + '</button>') +
+        // icon(), not the raw ICON entry: the raw SVG has no class, so it gets no
+        // size and no stroke colour and the button renders as an empty circle
+        '<button class="btn icon ghost" data-close aria-label="' + esc(t('close')) + '">' +
+        icon('x') + '</button>') +
       '</div>' +
       '<div class="modal-body">' + (opts.body || '') + '</div>' +
       (opts.actions ? '<div class="modal-foot">' + opts.actions + '</div>' : '');

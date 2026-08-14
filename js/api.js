@@ -1,7 +1,33 @@
 /* Al Fursan — data layer. Supabase RPC when configured, demo store otherwise. */
 (function () {
   const C = window.AF_CONFIG || {};
-  const LIVE = !!(C.url && C.anonKey && !/YOUR|example/i.test(C.url));
+  const SUPABASE = !!(C.url && C.anonKey && !/YOUR|example/i.test(C.url));
+  const API_URL = C.api || '/api/rpc';
+
+  /* Which backend answers. 'auto' asks the Netlify function once; if the site
+     is not on Netlify (or it is opened from a file), it falls back to this
+     browser for the session. */
+  let mode = C.backend === 'supabase' || (C.backend === 'auto' && SUPABASE) ? 'supabase'
+    : C.backend === 'netlify' ? 'netlify'
+    : C.backend === 'demo' ? 'demo'
+    : 'auto';
+
+  const LIVE = mode !== 'demo';
+
+  async function netlifyCall(fn, args) {
+    const res = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fn, args: args || {} })
+    });
+    if (res.status === 404 || res.status === 405) throw Object.assign(new Error('no function'), { missing: true });
+    const text = await res.text();
+    let out;
+    try { out = JSON.parse(text); }
+    catch (e) { throw Object.assign(new Error('bad response'), { missing: res.status >= 500 }); }
+    if (!res.ok && out && out.ok === undefined) throw new Error('rpc ' + fn + ' ' + res.status);
+    return out;
+  }
 
   let online = navigator.onLine !== false;
   const listeners = [];
@@ -14,11 +40,35 @@
   window.addEventListener('offline', () => setOnline(false));
 
   async function rpc(fn, args) {
-    if (!LIVE) {
+    if (mode === 'demo') {
       const out = await window.DEMO.call(fn, args);
       setOnline(true);
       return out;
     }
+
+    if (mode === 'auto' || mode === 'netlify') {
+      try {
+        const out = await netlifyCall(fn, args);
+        if (mode === 'auto') mode = 'netlify';        // it answered: stay with it
+        setOnline(true);
+        return out;
+      } catch (e) {
+        /* Still deciding, we are online, and the endpoint is not answering:
+           this site has no function (opened from a file, a plain static host,
+           a browser without fetch). Run in this browser instead of failing.
+           Once a call has succeeded the mode is fixed and we never fall back,
+           so a blip on the real site cannot quietly strand a rider on local
+           data. Offline is not a reason to switch either. */
+        const noEndpoint = e.missing || e instanceof TypeError || typeof fetch !== 'function';
+        if (mode === 'auto' && noEndpoint && navigator.onLine !== false) {
+          mode = 'demo';
+          return window.DEMO.call(fn, args);
+        }
+        if (!navigator.onLine) setOnline(false);
+        throw e;
+      }
+    }
+
     try {
       const res = await fetch(C.url.replace(/\/$/, '') + '/rest/v1/rpc/' + fn, {
         method: 'POST',
@@ -91,6 +141,7 @@
 
   window.API = {
     LIVE, rpc, cache, session, report,
+    get backend() { return mode; },
     get online() { return online; },
     onConnection(fn) { listeners.push(fn); },
 

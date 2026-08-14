@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const dir = fileURLToPath(new URL('../', import.meta.url));
-const FILES = ['js/config.js', 'js/i18n.js', 'js/demo.js', 'js/api.js', 'js/ui.js', 'js/guide.js',
+const FILES = ['js/config.js', 'js/i18n.js', 'js/store.js', 'js/demo.js', 'js/api.js', 'js/ui.js', 'js/guide.js',
   'js/student.js', 'js/admin.js', 'js/app.js'];
 
 let pass = 0, fail = 0;
@@ -111,6 +111,8 @@ ok('rider nav has 4 tabs', $$('#nav button').length === 4, $$('#nav button').len
 ok('the guide opens on the first sign-in', !$('#modal').hidden && !!$('.modal #gNext'));
 ok('the first run has no close button', !$('.modal [data-close]'));
 ok('the first run offers no skip', !$('.modal #gSkip') && !$('.modal #gNever'));
+ok('every dialog close button actually draws an icon',
+  [...w.document.querySelectorAll('.btn.icon')].every(b => b.querySelector('svg.ic')) !== false);
 w.history.back();
 await wait(150);
 ok('back does not dismiss the first run', !$('#modal').hidden);
@@ -356,6 +358,21 @@ $('#pw_c2').value = 'abd';
 $('#savePass').click();
 await wait(200);
 ok('mismatched passwords are refused', $('#toast').textContent.length > 0, $('#toast').textContent);
+
+/* reopened, the guide is skippable and offers "don't show again" — in the flow,
+   not floating over the step counter */
+$('#guideBtn').click();
+await wait(250);
+ok('reopening the guide offers skip and don\'t-show-again',
+  !!$('.modal #gSkip') && !!$('.modal #gNever'));
+ok('the reopened guide has a close button that draws its icon',
+  !!$('.modal [data-close]') && !!$('.modal [data-close] svg.ic'));
+ok('don\'t-show-again sits inside the dialog body', !!$('.modal .modal-body #gNever'));
+$('.modal #gNever').click();
+await wait(500);
+ok('muting the guide closes it and is remembered', $('#modal').hidden === true &&
+  JSON.parse(w.localStorage.getItem('af_demo_db_v2')).admins[0].guide === 2,
+  JSON.parse(w.localStorage.getItem('af_demo_db_v2')).admins[0].guide);
 
 ok('admin flow raised no JS errors', errors.length === 0, errors.join(' | '));
 

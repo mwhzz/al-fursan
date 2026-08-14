@@ -3,7 +3,7 @@
 Rider portal + academy console. Installable PWA, works offline for reading,
 English / বাংলা, light and dark themes, no build step (plain HTML/CSS/JS).
 
-**v2.1.0** — rebuilt end to end against [docs/UX-AUDIT.md](docs/UX-AUDIT.md) (all 62 findings fixed).
+**v2.2.0** — rebuilt end to end against [docs/UX-AUDIT.md](docs/UX-AUDIT.md) (all 62 findings fixed).
 
 📖 **[docs/GUIDE.md](docs/GUIDE.md) — what riders and the academy can do, and how.**
 The app also walks you through it on first sign-in.
@@ -23,16 +23,53 @@ Demo logins (no backend needed — data stays in that browser):
 | Rider | pick **Zawad** from the list, PIN `1111` |
 | Staff | tap **Staff**, `owner` / `alfursan` |
 
-## Deploy to Vercel
+## Deploy to Netlify — nothing else to sign up for
+
+The site ships with its own backend: one Netlify Function
+(`netlify/functions/api.js`) storing everything in **Netlify Blobs**, which comes
+with the site. No database account, no third party.
+
+1. Push this repo to GitHub.
+2. netlify.com → **Add new site → Import an existing project** → pick the repo.
+3. Leave the build command empty; publish directory `.`. `netlify.toml` sets the
+   rest. Deploy.
+
+That's it — riders on their own phones all see the same data.
+
+**On first load the site creates itself**: the class times (Fri/Sat/Mon/Wed at
+4:00–7:20 PM), the course prices, and one account — **owner / alfursan**. Sign in
+as Staff and change that password immediately, then add your riders.
+
+### Your own domain
+
+Netlify → **Domain management → Add a domain**. Point your registrar at Netlify's
+nameservers (or add the CNAME Netlify shows you). HTTPS is issued automatically;
+the app needs it for install-to-home-screen and notifications.
+
+### Running it locally
 
 ```bash
-npm i -g vercel && vercel --prod
+npm i -g netlify-cli
+npm i          # once, for @netlify/blobs
+netlify dev    # serves the site and the function together
 ```
 
-Or push to GitHub → vercel.com → **Add New Project** → Framework Preset **Other**,
-no build command.
+Opening `index.html` without `netlify dev` still works — the app notices there is
+no function and runs entirely in that browser, with sample riders, so you can look
+around. Nothing is shared in that mode.
 
-## Connect Supabase (so every phone shares the same data)
+### Where the data lives
+
+One JSON blob in the site's Blobs store, written only when something changes. Back
+it up from **Settings → Export**; restore from the same screen. Reads never write,
+so the id of a class time never changes underneath a booking.
+
+One caveat: the function reads and writes the whole blob, so two people saving in
+the same second could have one overwrite the other. At an academy's traffic that
+does not come up; if it ever does, move to Supabase below, which does not have the
+limitation.
+
+## Or connect Supabase (Postgres, if you prefer)
 
 1. Create a free project at [supabase.com](https://supabase.com).
 2. **SQL Editor** → paste all of `supabase/schema.sql` → **Run**. No extensions needed.
@@ -100,20 +137,30 @@ what is owed, and both sides see the same running balance.
 ## Structure
 
 ```text
-index.html              app shell
-css/styles.css          light + dark themes, one token set
-js/config.js            Supabase keys + logo path      ← the only file you edit
-js/i18n.js              English / বাংলা
-js/api.js               RPC layer, session tokens, offline + error reporting
-js/demo.js              localStorage backend with the identical contract
-js/ui.js                router, dialogs, theme, timezone-aware dates
-js/student.js           rider app
-js/admin.js             academy console
-js/app.js               sign-in, boot, PWA
-supabase/schema.sql     tables, RLS, RPCs, seed, Telegram relay
-sw.js                   offline cache + "new version" prompt
-docs/UX-AUDIT.md        the 62-point audit this version was built from
+index.html               app shell
+netlify.toml             hosting, the /api/rpc route, cache headers
+netlify/functions/api.js the backend on Netlify (Blobs)
+css/styles.css           light + dark themes, one token set
+js/config.js             backend choice + logo path      ← usually the only edit
+js/i18n.js               English / বাংলা
+js/store.js              the rules, shared by the browser and the function
+js/demo.js               that store, kept in localStorage
+js/api.js                picks a backend, session tokens, offline, error reports
+js/ui.js                 router, dialogs, theme, timezone-aware dates
+js/guide.js              the first-run walkthrough
+js/student.js            rider app
+js/admin.js              academy console
+js/app.js                sign-in, boot, PWA
+supabase/schema.sql      the same rules again, for Postgres
+sw.js                    offline cache + "new version" prompt
+docs/GUIDE.md            how to use both apps
+docs/UX-AUDIT.md         the 62-point audit this version was built from
 ```
+
+`js/store.js` is the single implementation of the rules for the browser and the
+Netlify function, so those two can never drift. `supabase/schema.sql` is the same
+rules in SQL, and `tests/sql.mjs` runs them against a real PostgreSQL to keep the
+two honest.
 
 ## Courses
 
@@ -138,11 +185,15 @@ logo: 'assets/logo.png'
 ## Tests
 
 ```bash
-cd tests && npm i
-node sql.mjs     # 64 checks against real PostgreSQL (schema.sql in PGlite)
-node logic.mjs   # 67 checks on the demo backend
-node ui.mjs      # 88 checks driving both apps through jsdom
+cd tests && npm i && npm test
 ```
+
+| Suite | Checks | What it covers |
+| --- | --- | --- |
+| `sql.mjs` | 83 | `schema.sql` in a real PostgreSQL (PGlite), called the way PostgREST does |
+| `logic.mjs` | 75 | the same journeys against the shared store |
+| `netlify.mjs` | 28 | the hosted endpoint, with storage faked |
+| `ui.mjs` | 101 | both apps driven through jsdom |
 
 - **`sql.mjs`** loads `supabase/schema.sql` into an actual PostgreSQL (PGlite/WASM) and
   calls the RPCs the way PostgREST does. It exists because everything else talks to the

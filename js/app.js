@@ -76,8 +76,14 @@
     U.app().innerHTML =
       '<div class="login-wrap"><div class="panel login view">' +
         U.logo('mark') +
-        '<h1>' + U.esc(S().academy_name || 'AL FURSAN') + '</h1>' +
-        '<div class="brand-sub" style="margin-bottom:18px">' + U.esc(t('academySub')) + '</div>' +
+        (function () {
+          const name = S().academy_name || 'Al Fursan Equestrian Academy';
+          // don't print "Equestrian Academy" twice when it is already in the name
+          const sub = name.toLowerCase().indexOf(t('academySub').toLowerCase()) >= 0 ? '' : t('academySub');
+          return '<h1 style="text-wrap:balance">' + U.esc(name) + '</h1>' +
+            (sub ? '<div class="brand-sub">' + U.esc(sub) + '</div>' : '');
+        })() +
+        '<div style="height:18px"></div>' +
 
         (isStaff ? staffStep() : (step === 'pin' ? pinStep() : nameStep())) +
 
@@ -94,6 +100,7 @@
       '</div></div>';
 
     document.getElementById('nav').hidden = true;
+    document.querySelector('.shell').classList.remove('signed-in');
     bindLogin();
   }
 

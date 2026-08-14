@@ -111,11 +111,13 @@
       title: s.title,
       body:
         '<div class="row" style="justify-content:center;margin-bottom:4px">' +
-          '<span class="avatar" style="width:64px;height:64px;border-radius:20px">' +
-          U.icon(s.icon, 'ic').replace('width:20px', '') + '</span></div>' +
+          '<span class="avatar guide-mark">' + U.icon(s.icon, 'ic-guide') + '</span></div>' +
         '<p class="muted" style="line-height:1.65">' + s.body + '</p>' +
         '<div class="row" style="justify-content:center;gap:5px;margin-top:6px">' + dots + '</div>' +
-        '<p class="tiny dim center">' + U.esc(t('step', { a: n(step + 1), b: n(all.length) })) + '</p>',
+        '<p class="tiny dim center">' + U.esc(t('step', { a: n(step + 1), b: n(all.length) })) + '</p>' +
+        // in the normal flow, not floating over the step counter
+        (locked ? '' : '<div class="row" style="justify-content:center">' +
+          '<button class="btn sm ghost" id="gNever">' + U.esc(t('guideNever')) + '</button></div>'),
       actions:
         (step > 0
           ? '<button class="btn ghost" id="gBack">' + U.esc(t('guideBack')) + '</button>'
@@ -127,24 +129,13 @@
         if (back) back.addEventListener('click', () => { step--; render(); });
         const skip = box.querySelector('#gSkip');
         if (skip) skip.addEventListener('click', () => finish(1));
+        const never = box.querySelector('#gNever');
+        if (never) never.addEventListener('click', () => finish(2));
         box.querySelector('#gNext').addEventListener('click', () => {
           if (last) finish(1); else { step++; render(); }
         });
       }
     });
-
-    // "don't show again" only makes sense once they have already seen it
-    if (!locked) {
-      const foot = document.querySelector('#modal .modal-foot');
-      if (foot && !document.getElementById('gNever')) {
-        const bar = document.createElement('div');
-        bar.style.cssText = 'position:absolute;left:0;right:0;bottom:100%;padding:0 18px 8px;text-align:center';
-        bar.innerHTML = '<button class="btn sm ghost" id="gNever">' + U.esc(t('guideNever')) + '</button>';
-        foot.style.position = 'relative';
-        foot.appendChild(bar);
-        bar.querySelector('#gNever').addEventListener('click', () => finish(2));
-      }
-    }
   }
 
   async function finish(value) {

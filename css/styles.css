@@ -189,6 +189,7 @@ body.locked { overflow: hidden; }
 }
 
 /* ------------------------------------------------------------- structure --*/
+.shell { display: block; }
 .app {
   width: 100%; max-width: 760px; margin: 0 auto;
   padding: 0 16px calc(var(--nav-h) + env(safe-area-inset-bottom) + 20px);
@@ -318,6 +319,8 @@ h3 { font-size: .98rem; font-weight: 700; letter-spacing: -.01em; }
 .btn .ic { width: 19px; height: 19px; }
 
 .ic { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ic-guide { width: 34px; height: 34px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.guide-mark { width: 68px; height: 68px; border-radius: 22px; }
 .ic-lg { width: 38px; height: 38px; stroke: currentColor; fill: none; stroke-width: 1.4; opacity: .5; }
 
 /* ---------------------------------------------------------------- inputs --*/
@@ -536,8 +539,11 @@ button.item:active { transform: scale(.99); }
 
 @media (min-width: 900px) {
   :root { --nav-h: 0px; }
-  .shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 28px; max-width: 1200px; margin: 0 auto; padding: 0 24px; align-items: start; }
-  .app { max-width: none; padding: 0 0 60px; }
+  /* the sidebar layout only applies once signed in. Without the guard the hidden
+     nav leaves #app as the first grid item, and the sign-in card gets squeezed
+     into the 236px sidebar column. */
+  .shell.signed-in { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 28px; max-width: 1200px; margin: 0 auto; padding: 0 24px; align-items: start; }
+  .shell.signed-in .app { max-width: none; padding: 0 0 60px; }
   .nav {
     position: sticky; top: 22px; left: auto; transform: none; bottom: auto;
     flex-direction: column; gap: 4px; border-radius: var(--r-lg); padding: 10px; margin-top: 24px;

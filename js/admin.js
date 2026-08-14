@@ -1035,6 +1035,7 @@
                    ['schedule', 'calendar'], ['settings', 'gear']];
     const el = document.getElementById('nav');
     el.hidden = false;
+    document.querySelector('.shell').classList.add('signed-in');
     el.innerHTML = items.map(([k, ic]) =>
       '<button data-tab="' + k + '" ' + (tab === k ? 'aria-current="page"' : '') + ' style="position:relative">' +
       U.icon(ic) + '<span>' + U.esc(t(k === 'students' ? 'students' : k)) + '</span>' +
