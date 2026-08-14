@@ -31,10 +31,18 @@ with the site. No database account, no third party.
 
 1. Push this repo to GitHub.
 2. netlify.com → **Add new site → Import an existing project** → pick the repo.
-3. Leave the build command empty; publish directory `.`. `netlify.toml` sets the
-   rest. Deploy.
+3. Accept the defaults and deploy — `netlify.toml` already sets the build command
+   (`node build.js`), the publish directory (`dist`) and the function directory.
 
-That's it — riders on their own phones all see the same data.
+That's it — riders on their own phones all see the same data. Every later push to
+`main` redeploys.
+
+**Check it is really running the backend** — open `https://<your-site>/api/rpc` in
+a browser. It should answer `{"ok":false,"error":"method"}` (it only accepts POST).
+If you get a 404, the function did not deploy.
+
+`build.js` copies only the app into `dist/`, so `node_modules`, the test suite and
+`supabase/schema.sql` are never published.
 
 **On first load the site creates itself**: the class times (Fri/Sat/Mon/Wed at
 4:00–7:20 PM), the course prices, and one account — **owner / alfursan**. Sign in

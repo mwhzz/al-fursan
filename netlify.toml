@@ -1,7 +1,7 @@
 [build]
-  publish = "."
+  command = "node build.js"
+  publish = "dist"
   functions = "netlify/functions"
-  command = ""
 
 [functions]
   node_bundler = "esbuild"
@@ -11,6 +11,13 @@
 [[redirects]]
   from = "/api/rpc"
   to = "/.netlify/functions/api"
+  status = 200
+
+# the app is one page with hash routing; anything else still lands on it.
+# Existing files win over this rule, so assets are unaffected.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
   status = 200
 
 [[headers]]
