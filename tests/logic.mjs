@@ -116,6 +116,29 @@ ov = await call('admin_session', { p_token: A });
 const promoted = ov.bookings.find(b => b.student === toks[2].name);
 ok('waitlist auto-promotes to pending', promoted.status === 'pending', promoted && promoted.status);
 
+/* the seat limit must hold through "approve all" here too */
+// 18:30 has nobody on the recurring roster, so the seat maths starts from zero
+const capSlot = sess.schedule.find(s => s.day === 3 && s.time === '18:30');
+const capDate = nextDow(3);
+const capStatus = [];
+for (const [nm, pin] of [['Zawad', '1111'], ['Arifa', '2222'], ['Rahat', '3333'], ['Itrat', '4444'], ['Abaan', '5555']]) {
+  const s = bs2.directory.find(x => x.name === nm);
+  const lr = await call('student_login', { p_id: s.id, p_pin: pin });
+  if (!lr.ok) continue;
+  const bk = await call('student_book', { p_token: lr.token, p_slot: capSlot.id, p_date: capDate });
+  if (bk.ok) capStatus.push(bk.status);
+}
+ok('demo waitlists past the seat limit',
+  capStatus.filter(x => x === 'pending').length === 3 && capStatus.filter(x => x === 'waitlist').length >= 1,
+  capStatus);
+ov = await call('admin_session', { p_token: A });
+const capIds = ov.bookings.filter(b => b.slot_id === capSlot.id && b.date === capDate).map(b => b.id);
+const capRes = await call('admin_booking_action', { p_token: A, p_ids: capIds, p_action: 'approve' });
+ov = await call('admin_session', { p_token: A });
+const approvedHere = ov.bookings.filter(b => b.slot_id === capSlot.id && b.date === capDate && b.status === 'approved').length;
+ok('demo approve-all never exceeds the seat limit', approvedHere === 3, { approvedHere, capRes });
+ok('demo reports the overflow', capRes.skipped >= 1, capRes);
+
 /* ------------------------------------------------ balance + expiry rules */
 const rahat = ov.students.find(s => s.name === 'Rahat');
 await call('admin_save_student', { p_token: A, p_data: Object.assign({}, rahat, { total_classes: rahat.done }) });

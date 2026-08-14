@@ -289,11 +289,16 @@
     const expired = s.end_date && s.end_date < b.date;
     const conflict = (D.bookings || []).some(o => o.id !== b.id && o.student_id === b.student_id &&
       o.date === b.date && ['approved', 'pending'].includes(o.status));
+    const slot = slotById(b.slot_id) || {};
+    const cap = slot.capacity || 3;
+    const full = seatsTaken(b.slot_id, b.date) >= cap;
+
     const flags = [
       left <= 0 ? U.badge(t('noBalance'), 'bad', true) : U.badge(t('classesLeftShort', { n: n(left) }),
         left <= 2 ? 'wait' : 'ok'),
       expired ? U.badge(t('expired'), 'bad', true) : '',
       conflict ? U.badge(t('conflict'), 'wait', true) : '',
+      full ? U.badge(t('full'), 'bad', true) : '',
       b.status === 'waitlist' ? U.badge(t('waitlist'), 'wait') : ''
     ].filter(Boolean).join('');
 
@@ -307,7 +312,9 @@
       (selectable
         ? '<div class="row" style="gap:6px">' +
           '<button class="btn icon sm ghost" data-decline="' + U.esc(b.id) + '" aria-label="' + U.esc(t('decline')) + '">' + U.icon('x') + '</button>' +
-          '<button class="btn icon sm primary" data-approve="' + U.esc(b.id) + '" aria-label="' + U.esc(t('approve')) + '">' + U.icon('check') + '</button></div>'
+          '<button class="btn icon sm primary" data-approve="' + U.esc(b.id) + '"' + (full ? ' disabled' : '') +
+          ' aria-label="' + U.esc(t('approve')) + '" title="' + U.esc(full ? t('slotFull', { n: n(cap) }) : t('approve')) +
+          '">' + U.icon('check') + '</button></div>'
         : U.statusBadge(b.status) +
           (b.status === 'declined' ? '<button class="btn sm ghost" data-undo="' + U.esc(b.id) + '">' + U.esc(t('undo')) + '</button>' : '')) +
       '</div>';
@@ -346,9 +353,17 @@
       const res = await API.bookingAction(ids, action, reason || '');
       if (!res.ok) return U.toast(t('netErr'), 'err');
       picked = {};
-      U.toast(t(action === 'approve' ? 'approved' : action === 'decline' ? 'declined' : 'done'), 'ok');
+      if (res.skipped) U.toast(t('someFull', { n: n(res.skipped) }), 'err');
+      else U.toast(t(action === 'approve' ? 'approved' : action === 'decline' ? 'declined' : 'done'), 'ok');
       await reload({});
     } catch (e) { U.toast(t('netErr'), 'err'); }
+  }
+
+  /** confirmed riders in a slot on a date: the recurring roster plus approvals */
+  function seatsTaken(slotId, date) {
+    const s = slotById(slotId);
+    return ((s && s.students) || []).length +
+      (D.bookings || []).filter(b => b.slot_id === slotId && b.date === date && b.status === 'approved').length;
   }
 
   function declineDialog(id) {
@@ -407,7 +422,8 @@
     if (!det || !det.ok) return U.toast(t('netErr'), 'err');
     const s = det.student;
     const left = balanceOf(s);
-    const wa = String(S().whatsapp || s.phone || '').replace(/[^0-9]/g, '');
+    // message the RIDER, not the academy's own number
+    const wa = String(s.phone || '').replace(/[^0-9]/g, '');
     const msg = encodeURIComponent(S().academy_name + ' — ' + t('name') + ': ' + s.name + ' · ' + t('pin') + ': ' + s.pin);
 
     U.dialog({
@@ -920,7 +936,9 @@
     wire('[data-approve]', 'click', el => decide([el.dataset.approve], 'approve'));
     wire('[data-decline]', 'click', el => declineDialog(el.dataset.decline));
     wire('[data-undo]', 'click', el => decide([el.dataset.undo], 'undo'));
-    wire('#approveAll', 'click', () => decide(pendingList().map(b => b.id), 'approve'));
+    wire('#approveAll', 'click', () => decide(
+      pendingList().filter(b => seatsTaken(b.slot_id, b.date) < ((slotById(b.slot_id) || {}).capacity || 3))
+        .map(b => b.id), 'approve'));
     wire('#approveSel', 'click', () => decide(Object.keys(picked).filter(k => picked[k]), 'approve'));
     wire('#askNotify', 'click', askNotify);
 

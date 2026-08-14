@@ -45,6 +45,30 @@ ok('the nav bar is hidden on the login screen', $('#nav').hidden === true);
 const css = fs.readFileSync(dir + 'css/styles.css', 'utf8');
 ok('CSS keeps .nav[hidden] hidden', /\.nav\[hidden\]\s*\{[^}]*display:\s*none/.test(css));
 ok('CSS keeps .modal-wrap[hidden] hidden', /\.modal-wrap\[hidden\]\s*\{[^}]*display:\s*none/.test(css));
+
+/* Static checks: a missing translation key renders the key itself, and a
+   missing icon name renders nothing at all — both are silent in a browser. */
+const appJs = ['js/i18n.js', 'js/ui.js', 'js/api.js', 'js/student.js', 'js/admin.js', 'js/app.js']
+  .map(f => fs.readFileSync(dir + f, 'utf8'));
+const dict = w.I18N.dict;
+const enDict = (() => { w.I18N.set('en'); const d = w.I18N.dict; return d; })();
+const usedKeys = new Set();
+appJs.slice(1).forEach(src => {
+  for (const m of src.matchAll(/\bt\(\s*'([a-zA-Z][a-zA-Z0-9_]*)'/g)) usedKeys.add(m[1]);
+});
+const missing = [...usedKeys].filter(k => enDict[k] === undefined);
+ok('every translation key used in the app exists', missing.length === 0, missing);
+
+const bnDict = (() => { w.I18N.set('bn'); const d = w.I18N.dict; w.I18N.set('en'); return d; })();
+const untranslated = [...usedKeys].filter(k => bnDict[k] === undefined);
+ok('every key is translated to Bangla too', untranslated.length === 0, untranslated);
+
+const usedIcons = new Set();
+appJs.slice(1).forEach(src => {
+  for (const m of src.matchAll(/\bicon\(\s*'([a-zA-Z]+)'/g)) usedIcons.add(m[1]);
+});
+const badIcons = [...usedIcons].filter(k => !w.UI.ICON[k]);
+ok('every icon name used in the app exists', badIcons.length === 0, badIcons);
 ok('name directory is offered', $$('[data-id]').length === 6, $$('[data-id]').length);
 ok('no PIN box before a name is chosen', !$('#pin'));
 

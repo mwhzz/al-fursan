@@ -164,6 +164,58 @@ ok('a cancellation promotes the waitlist',
   ov.bookings.find(b => b.student === 'Itrat').status === 'pending',
   ov.bookings.find(b => b.student === 'Itrat'));
 
+/* The seat limit is the academy's core rule. It must survive five riders all
+   requesting the same class and the owner pressing "approve all". */
+const capSlot = sess.schedule.find(s => s.day === 3 && s.time === '17:40');
+const capDate = isoOf((await one(
+  "select (_today() + ((3 - extract(dow from _today())::int + 7) % 7))::date as d")).d);
+const capIds = [];
+for (const [nm, pin] of [['C1', '1101'], ['C2', '1102'], ['C3', '1103'], ['C4', '1104'], ['C5', '1105']]) {
+  const r = await call('admin_save_student', {
+    p_token: A, p_data: { name: nm, pin, course: 'basic', total_classes: 8, start_date: todayISO, tags: [], active: true }
+  });
+  const tk = (await call('student_login', { p_id: r.id, p_name: null, p_pin: pin, p_days: 30 })).token;
+  const bk = await call('student_book', { p_token: tk, p_slot: capSlot.id, p_date: capDate, p_note: '' });
+  capIds.push({ nm, status: bk.status });
+}
+ok('past the seat limit riders are waitlisted, not queued as pending',
+  capIds.filter(x => x.status === 'pending').length === 3 &&
+  capIds.filter(x => x.status === 'waitlist').length === 2, capIds);
+
+ov = await call('admin_session', { p_token: A });
+const capBookings = ov.bookings.filter(b => b.slot_id === capSlot.id && isoOf(b.date) === capDate).map(b => b.id);
+const approveAll = await call('admin_booking_action', { p_token: A, p_ids: capBookings, p_action: 'approve', p_reason: '' });
+const confirmed = (await one(`select _slot_taken('${capSlot.id}'::uuid, '${capDate}'::date) t`)).t;
+ok('approve-all never confirms past the seat limit',
+  confirmed === capSlot.capacity, { confirmed, capacity: capSlot.capacity, approveAll });
+ok('the overflow is reported back to the owner', approveAll.skipped >= 1, approveAll);
+
+ov = await call('admin_session', { p_token: A });
+const capApproved = ov.bookings
+  .filter(b => b.slot_id === capSlot.id && isoOf(b.date) === capDate && b.status === 'approved')
+  .map(b => b.student).sort();
+ok('seats go to whoever asked first', JSON.stringify(capApproved) === JSON.stringify(['C1', 'C2', 'C3']),
+  capApproved);
+
+/* "can't attend" has to actually hand the seat back */
+const absentSlot = capSlot, absentDate = capDate;
+const beforeAbsent = (await one(`select _slot_taken('${absentSlot.id}'::uuid, '${absentDate}'::date) t`)).t;
+const c1 = ov.students.find(s => s.name === 'C1');
+const c1tok = (await call('student_login', { p_id: c1.id, p_name: null, p_pin: '1101', p_days: 30 })).token;
+const abs = await call('student_absence', {
+  p_token: c1tok, p_slot: absentSlot.id, p_date: absentDate, p_reason: 'fever'
+});
+const afterAbsent = (await one(`select _slot_taken('${absentSlot.id}'::uuid, '${absentDate}'::date) t`)).t;
+ok('an absence notice frees the seat', abs.ok && afterAbsent === beforeAbsent - 1,
+  { beforeAbsent, afterAbsent, abs });
+ov = await call('admin_session', { p_token: A });
+ok('the absence cancels that booking',
+  !ov.bookings.some(b => b.student_id === c1.id && isoOf(b.date) === absentDate &&
+    ['pending', 'approved', 'waitlist'].includes(b.status)));
+ok('and the freed seat promotes someone from the waitlist',
+  ov.bookings.some(b => b.slot_id === absentSlot.id && isoOf(b.date) === absentDate && b.status === 'pending'),
+  ov.bookings.filter(b => b.slot_id === absentSlot.id).map(b => b.student + ':' + b.status));
+
 /* --------------------------------------------------- balance and expiry --*/
 const exhausted = ov.students.find(s => s.name === 'Rahat');
 await call('admin_save_student', { p_token: A, p_data: Object.assign({}, exhausted, { total_classes: 0 }) });
@@ -270,8 +322,10 @@ ok('deleting works with the right name',
 const exp = await call('admin_export', { p_token: A });
 ok('the backup contains every table',
   exp.ok && exp.data.students && exp.data.slots && exp.data.attendance && exp.data.payments && exp.data.bookings);
+const liveCount = (await one('select count(*)::int c from students')).c;
 const pv = await call('admin_import', { p_token: A, p_data: exp.data, p_mode: 'preview' });
-ok('import previews without writing', pv.ok && pv.preview && pv.students === 3 && pv.current.students === 3, pv);
+ok('import previews without writing',
+  pv.ok && pv.preview && pv.students === liveCount && pv.current.students === liveCount, pv);
 const before = (await call('admin_session', { p_token: A })).students.length;
 await call('admin_import', { p_token: A, p_data: exp.data, p_mode: 'merge' });
 ok('a merge import creates no duplicates',

@@ -105,11 +105,28 @@
   const closed = (slotId, date) => DB().closures.some(c =>
     c.date === date && (!c.slot_id || c.slot_id === slotId));
 
-  const slotTaken = (slotId, date) => riders(slotId).length +
-    DB().bookings.filter(b => b.slot_id === slotId && b.date === date && b.status === 'approved').length;
+  /* Confirmed seats for one date: roster + approved bookings, minus anyone
+     already marked absent that day (same rule as _slot_taken in SQL). */
+  const slotTaken = (slotId, date) => {
+    const slot = DB().slots.find(s => s.id === slotId) || {};
+    const ids = new Set(riders(slotId).map(r => r.id));
+    DB().bookings.filter(b => b.slot_id === slotId && b.date === date && b.status === 'approved')
+      .forEach(b => ids.add(b.student_id));
+    let count = 0;
+    ids.forEach(id => {
+      const away = DB().attendance.some(a => a.student_id === id && a.date === date &&
+        (a.time || '') === (slot.time || '') && a.status === 'absent');
+      if (!away) count++;
+    });
+    return count;
+  };
+  // everyone still waiting: shown to the rider, and what a new booking queues behind
   const slotPending = (slotId, date) =>
     DB().bookings.filter(b => b.slot_id === slotId && b.date === date &&
       ['pending', 'waitlist'].includes(b.status)).length;
+  // provisional seats only — waitlisted riders must not block their own promotion
+  const slotHolds = (slotId, date) =>
+    DB().bookings.filter(b => b.slot_id === slotId && b.date === date && b.status === 'pending').length;
 
   const schedule = (forAdmin) => DB().slots
     .filter(s => forAdmin || s.active !== false)
@@ -175,12 +192,14 @@
   function promoteWaitlist(slotId, date) {
     const slot = DB().slots.find(s => s.id === slotId);
     if (!slot) return;
-    let guard = 0;
-    while (slotTaken(slotId, date) < (slot.capacity || 3) && guard++ < 20) {
+    // only as many as there are seats, counting pending as provisional
+    let free = (slot.capacity || 3) - slotTaken(slotId, date) - slotHolds(slotId, date);
+    while (free > 0) {
       const b = DB().bookings
         .filter(x => x.slot_id === slotId && x.date === date && x.status === 'waitlist')
         .sort((a, c) => String(a.created_at).localeCompare(String(c.created_at)))[0];
       if (!b) break;
+      free -= 1;
       b.status = 'pending'; b.seen = false;
       notify(b.student_id, 'waitlist', 'A seat opened up',
         'Your waitlisted class on ' + b.date + ' is now waiting for approval.');
@@ -262,7 +281,9 @@
             ['pending', 'approved', 'waitlist'].includes(b.status)))
         return { ok: false, error: 'exists' };
 
-      const status = slotTaken(p_slot, p_date) >= (slot.capacity || 3) ? 'waitlist' : 'pending';
+      // a pending request holds a provisional seat (same rule as the SQL backend)
+      const status = slotTaken(p_slot, p_date) + slotPending(p_slot, p_date) >= (slot.capacity || 3)
+        ? 'waitlist' : 'pending';
       DB().bookings.push({ id: uid(), student_id: s.id, slot_id: p_slot, date: p_date,
         status, note: p_note || '', reason: '', seen: false, created_at: nowISO(), decided_at: null });
       log(s.name, 'booking.request', p_date);
@@ -297,9 +318,10 @@
       if (found) { found.status = 'absent'; found.note = note; }
       else DB().attendance.push({ id: uid(), student_id: s.id, date: p_date, time: slot.time || null,
         status: 'absent', note, created_at: nowISO() });
+      // release the booked seat as well, or the slot still looks full
       DB().bookings.filter(b => b.student_id === s.id && b.slot_id === p_slot && b.date === p_date &&
         ['pending', 'approved', 'waitlist'].includes(b.status))
-        .forEach(b => { b.status = 'cancelled'; b.reason = p_reason || ''; });
+        .forEach(b => { b.status = 'cancelled'; b.reason = 'could not attend'; b.decided_at = nowISO(); });
       log(s.name, 'absence.notice', p_date);
       promoteWaitlist(p_slot, p_date);
       commit();
@@ -485,12 +507,18 @@
     admin_booking_action({ p_token, p_ids, p_action, p_reason }) {
       const a = adminOf(p_token);
       if (!a) return DENY;
-      let n = 0;
-      (p_ids || []).forEach(id => {
+      let n = 0, skipped = 0;
+      // oldest request first, so seats go to whoever asked first
+      const ordered = (p_ids || []).map(id => DB().bookings.find(x => x.id === id)).filter(Boolean)
+        .sort((x, y) => String(x.created_at).localeCompare(String(y.created_at))).map(x => x.id);
+      ordered.forEach(id => {
         const b = DB().bookings.find(x => x.id === id);
         if (!b) return;
         const st = DB().students.find(x => x.id === b.student_id) || {};
         if (p_action === 'approve') {
+          // never confirm past the seat limit, not even through "approve all"
+          const slot = DB().slots.find(x => x.id === b.slot_id) || {};
+          if (slotTaken(b.slot_id, b.date) >= (slot.capacity || 3)) { skipped++; return; }
           b.status = 'approved'; b.seen = true; b.decided_at = nowISO();
           notify(b.student_id, 'approved', 'Class confirmed', b.date);
         } else if (p_action === 'decline') {
@@ -507,7 +535,7 @@
         log(a.username, 'booking.' + p_action, st.name || '');
       });
       commit();
-      return { ok: true, count: n };
+      return { ok: true, count: n, skipped };
     },
 
     admin_bookings_seen({ p_token }) {

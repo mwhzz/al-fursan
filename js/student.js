@@ -190,7 +190,7 @@
         if (isClosed(s.id, d)) return;
         closedAll = false;
         const seat = seatOf(s.id, d);
-        free += Math.max(0, (s.capacity || 3) - seat.taken);
+        free += Math.max(0, (s.capacity || 3) - seat.taken - seat.pending);
       });
       // the day itself is colour-coded: seats free / nearly full / full / cancelled
       const state = !has ? '' : closedAll ? 'closed' : free === 0 ? 'full' : free <= 2 ? 'tight' : 'free';
@@ -216,7 +216,8 @@
     for (let i = 0; i < cap; i++)
       seats += '<span class="seat' + (i < seat.taken ? ' on' : (i < seat.taken + seat.pending ? ' wait' : '')) + '"></span>';
 
-    const freeSeats = cap - seat.taken;
+    // a pending request holds a provisional seat, exactly as the backend counts it
+    const freeSeats = cap - seat.taken - seat.pending;
     let action = '';
     if (closure) action = '';
     else if (mine) action = U.badge(t('youAreIn'), 'ok', true);

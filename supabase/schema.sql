@@ -272,17 +272,40 @@ returns boolean language sql security definer stable set search_path = public as
   select exists (select 1 from closures where date = p_date and (slot_id is null or slot_id = p_slot));
 $$;
 
--- confirmed seats only: roster + approved bookings (pending/waitlist do NOT fill a slot)
+-- Confirmed seats for one date: the recurring roster plus approved bookings,
+-- minus anyone already marked absent that day. Pending and waitlisted riders do
+-- not fill a slot. Telling the academy you cannot come has to hand the seat
+-- back, otherwise the feature is cosmetic.
 create or replace function public._slot_taken(p_slot uuid, p_date date)
 returns int language sql security definer stable set search_path = public as $$
-  select (select count(*) from slot_students where slot_id = p_slot)
-       + (select count(*) from bookings where slot_id = p_slot and date = p_date and status = 'approved');
+  with people as (
+    select student_id from slot_students where slot_id = p_slot
+    union
+    select student_id from bookings
+     where slot_id = p_slot and date = p_date and status = 'approved'
+  )
+  select count(*)::int from people p
+   where not exists (
+     select 1 from attendance a
+      where a.student_id = p.student_id and a.date = p_date
+        and coalesce(a."time",'') = coalesce((select s."time" from slots s where s.id = p_slot), '')
+        and a.status = 'absent');
 $$;
 
+-- everyone still waiting on this slot: what the rider sees as "N waiting", and
+-- what a new booking has to queue behind
 create or replace function public._slot_pending(p_slot uuid, p_date date)
 returns int language sql security definer stable set search_path = public as $$
   select count(*)::int from bookings
    where slot_id = p_slot and date = p_date and status in ('pending','waitlist');
+$$;
+
+-- only the provisional seats. Waitlisted riders must not count here, or they
+-- would block their own promotion.
+create or replace function public._slot_holds(p_slot uuid, p_date date)
+returns int language sql security definer stable set search_path = public as $$
+  select count(*)::int from bookings
+   where slot_id = p_slot and date = p_date and status = 'pending';
 $$;
 
 create or replace function public._schedule(p_admin boolean default false)
@@ -446,7 +469,9 @@ begin
     return jsonb_build_object('ok', false, 'error', 'exists');
   end if;
 
-  v_taken := _slot_taken(p_slot, p_date);
+  -- a pending request holds a provisional seat, otherwise everyone books into a
+  -- full class and the academy has to turn people away one by one
+  v_taken := _slot_taken(p_slot, p_date) + _slot_pending(p_slot, p_date);
   v_status := case when v_taken >= v_cap then 'waitlist' else 'pending' end;
 
   insert into bookings (student_id, slot_id, date, note, status)
@@ -470,7 +495,8 @@ begin
   cutoff := coalesce(nullif(_setting('cancel_cutoff_h','3'),'')::int, 3);
   when_ts := (b.date::text || ' ' || (select "time" from slots where id = b.slot_id) || ':00')::timestamp
              at time zone _setting('timezone','Asia/Dhaka');
-  if b.status = 'approved' and when_ts - now() < make_interval(hours => cutoff) then
+  -- only inside the window before the class; a class already past can be tidied up
+  if b.status = 'approved' and when_ts > now() and when_ts - now() < make_interval(hours => cutoff) then
     return jsonb_build_object('ok', false, 'error', 'cutoff', 'hours', cutoff);
   end if;
 
@@ -492,6 +518,12 @@ begin
     values (st.id, p_date, (select "time" from slots where id = p_slot), 'absent', 'notified: ' || coalesce(p_reason,''))
     on conflict (student_id, date, (coalesce("time",''))) do update
       set status = 'absent', note = 'notified: ' || coalesce(p_reason,'');
+
+  -- release the booked seat as well, or the slot still looks full
+  update bookings set status = 'cancelled', reason = 'could not attend', decided_at = now()
+   where student_id = st.id and slot_id = p_slot and date = p_date
+     and status in ('pending','approved','waitlist');
+
   perform _telegram('🚫 ' || st.name || ' cannot attend ' || to_char(p_date,'DD Mon') ||
                     case when coalesce(p_reason,'') <> '' then ' — ' || p_reason else '' end);
   perform _log(st.name, 'absence.notice', to_char(p_date,'YYYY-MM-DD'));
@@ -540,15 +572,18 @@ $$;
 -- when a seat frees up, offer it to the first person waiting
 create or replace function public._promote_waitlist(p_slot uuid, p_date date)
 returns void language plpgsql security definer set search_path = public as $$
-declare v_cap int; b bookings; nm text;
+declare v_cap int; v_free int; b bookings; nm text;
 begin
   select capacity into v_cap from slots where id = p_slot;
   if v_cap is null then return; end if;
-  while _slot_taken(p_slot, p_date) < v_cap loop
+  -- promote only as many as there are seats, counting pending as provisional
+  v_free := v_cap - _slot_taken(p_slot, p_date) - _slot_holds(p_slot, p_date);
+  while v_free > 0 loop
     select * into b from bookings
       where slot_id = p_slot and date = p_date and status = 'waitlist'
       order by created_at limit 1;
     exit when not found;
+    v_free := v_free - 1;
     update bookings set status = 'pending', seen = false where id = b.id;
     select name into nm from students where id = b.student_id;
     perform _notify_student(b.student_id, 'waitlist', 'A seat opened up',
@@ -740,6 +775,11 @@ begin
     insert into attendance (student_id, date, "time", status)
       values (p_student, p_date, p_time, p_status) returning id into v_id;
   end if;
+  -- an absence hands the seat back, so someone waiting can have it
+  if p_status = 'absent' then
+    perform public._promote_waitlist((select id from slots where "time" = p_time
+      and day = extract(dow from p_date)::int limit 1), p_date);
+  end if;
   return jsonb_build_object('ok', true, 'id', v_id, 'status', p_status);
 end $$;
 
@@ -765,17 +805,24 @@ end $$;
 create or replace function public.admin_booking_action(p_token text, p_ids uuid[], p_action text,
   p_reason text default '')
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare a admin_users; b bookings; v_id uuid; nm text; n int := 0;
+declare a admin_users; b bookings; nm text; v_cap int; n int := 0; n_skip int := 0;
 begin
   a := _admin(p_token);
   if a.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
 
-  foreach v_id in array p_ids loop
-    select * into b from bookings where id = v_id;
-    continue when not found;
+  -- oldest request first: seats must go to whoever asked first, not to whoever
+  -- happens to sit at the top of the admin's list
+  for b in select * from bookings where id = any(p_ids) order by created_at loop
     select name into nm from students where id = b.student_id;
 
     if p_action = 'approve' then
+      -- the seat limit is the whole point of the slot: never confirm past it,
+      -- not even through "approve all"
+      select capacity into v_cap from slots where id = b.slot_id;
+      if _slot_taken(b.slot_id, b.date) >= coalesce(v_cap, 3) then
+        n_skip := n_skip + 1;
+        continue;
+      end if;
       update bookings set status = 'approved', seen = true, decided_at = now() where id = b.id;
       perform _notify_student(b.student_id, 'approved', 'Class confirmed',
         to_char(b.date, 'DD Mon') || ' · ' || (select "time" from slots where id = b.slot_id));
@@ -795,7 +842,7 @@ begin
     n := n + 1;
     perform _log(a.username, 'booking.' || p_action, coalesce(nm,''));
   end loop;
-  return jsonb_build_object('ok', true, 'count', n);
+  return jsonb_build_object('ok', true, 'count', n, 'skipped', n_skip);
 end $$;
 
 create or replace function public.admin_bookings_seen(p_token text)
