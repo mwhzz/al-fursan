@@ -4,3 +4,4 @@ node_modules/
 Thumbs.db
 *.log
 dist/
+tests/.local-db.json

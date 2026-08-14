@@ -74,10 +74,14 @@ the app needs it for install-to-home-screen and notifications.
 ### Running it locally
 
 ```bash
-npm i -g netlify-cli
-npm i          # once, for @netlify/blobs
-netlify dev    # serves the site and the function together
+npm i                          # once
+node tests/serve.mjs           # http://localhost:8787
+node tests/serve.mjs 3000 fresh   # another port, empty academy
 ```
+
+This serves the built site and the function together, exactly as Netlify does,
+with the database in `tests/.local-db.json`. `netlify dev` works too if you have
+the CLI.
 
 Opening `index.html` without `netlify dev` still works — the app notices there is
 no function and runs entirely in that browser, with sample riders, so you can look
