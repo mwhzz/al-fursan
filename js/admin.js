@@ -131,11 +131,12 @@
     return '<div class="item" data-state="' + st + '" data-row="' + U.esc(x.id) + '" ' +
       'data-slot="' + U.esc(slot.id) + '">' +
       U.avatar(x.name, st === 'present' ? 'ok' : st === 'absent' ? 'bad' : '',
-        st === 'none' ? (stu.course || 'basic') : null) +
+        st === 'none' ? (stu.course || 'basic') : null, stu.course || 'basic') +
       '<div class="grow"><div style="font-weight:700">' + U.esc(x.name) +
         (x.booked ? ' ' + U.badge(t('approved'), 'info') : '') + '</div>' +
-      '<div class="tiny dim">' + n(stu.done || 0) + '/' + n(stu.total_classes || 0) + ' · ' +
-        U.esc(t(stu.course || 'basic')) + (rec && rec.note ? ' · ' + U.esc(rec.note) : '') + '</div></div>' +
+      '<div class="tiny dim"><span data-count>' + n(stu.done || 0) + '/' + n(stu.total_classes || 0) +
+        '</span> · ' + U.esc(t(stu.course || 'basic')) +
+        '<span data-note>' + (rec && rec.note ? ' · ' + U.esc(rec.note) : '') + '</span></div></div>' +
       '<div class="row" style="gap:6px">' +
         '<button class="btn icon sm ' + (st === 'present' ? 'ok' : 'ghost') + '" data-mark="present" ' +
           'aria-label="' + U.esc(t('present')) + '" aria-pressed="' + (st === 'present') + '">' + U.icon('check') + '</button>' +
@@ -239,13 +240,27 @@
       if (stu) {
         if (next === 'present' && prev !== 'present') stu.done = (stu.done || 0) + 1;
         if (prev === 'present' && next !== 'present') stu.done = Math.max(0, (stu.done || 0) - 1);
-        const sub = rowEl.querySelector('.tiny.dim');
-        if (sub) sub.textContent = n(stu.done) + '/' + n(stu.total_classes) + ' · ' + t(stu.course || 'basic');
+        // only the count — rewriting the whole line would drop the rider's note
+        const cnt = rowEl.querySelector('[data-count]');
+        if (cnt) cnt.textContent = n(stu.done) + '/' + n(stu.total_classes);
       }
+      refreshSlotState(rowEl.dataset.slot);
     } catch (e) {
       applyRow(rowEl, prev);
+      if (prev === 'none') delete attIndex[attKey(sid, datePick, slot.time)];
+      refreshSlotState(rowEl.dataset.slot);
       U.toast(t('netErr'), 'err');
     }
+  }
+
+  /** keep the slot card's summary stripe honest without a full re-render */
+  function refreshSlotState(slotId) {
+    const card = document.querySelector('[data-slotcard="' + slotId + '"]');
+    if (!card) return;
+    const rows = [...card.querySelectorAll('[data-row]')];
+    if (!rows.length) return;
+    const marked = rows.filter(r => r.dataset.state && r.dataset.state !== 'none').length;
+    card.dataset.state = marked === rows.length ? 'present' : marked ? 'partial' : 'none';
   }
 
   function applyRow(rowEl, status) {
@@ -255,6 +270,9 @@
     rowEl.classList.add('pulse');
     const av = rowEl.querySelector('.avatar');
     av.className = 'avatar' + (status === 'present' ? ' ok' : status === 'absent' ? ' bad' : '');
+    // the course tint must step aside once a status is set, and come back when cleared
+    if (status === 'none') { if (av.dataset.courseWas) av.dataset.course = av.dataset.courseWas; }
+    else if (av.dataset.course) { av.dataset.courseWas = av.dataset.course; av.removeAttribute('data-course'); }
     const [pBtn, aBtn] = rowEl.querySelectorAll('[data-mark]');
     pBtn.classList.toggle('ok', status === 'present');
     pBtn.classList.toggle('ghost', status !== 'present');
@@ -640,7 +658,7 @@
         const del = box.querySelector('#sdel');
         if (del) del.addEventListener('click', async () => {
           const yes = await U.confirm({ title: U.time12(s.time), message: t('areYouSure'), danger: true, okText: t('delete') });
-          if (!yes) return;
+          if (!yes) { slotForm(s); return; }          // cancelling must return to the editor
           await API.deleteSlot(s.id); U.toast(t('deleted')); reload({});
         });
         box.querySelector('#ssave').addEventListener('click', async () => {
@@ -1020,7 +1038,9 @@
       D = payload; reindex();
       U.setTZ(S().timezone);
       datePick = U.todayISO();
-      tab = route && route.tab ? route.tab : 'today';
+      const TABS = ['today', 'requests', 'students', 'schedule', 'settings'];
+      const want = route && route.tab;
+      tab = TABS.indexOf(want) >= 0 ? want : 'today';
       knownPending = new Set(pendingList().map(b => b.id));
       render();
       startPolling();
@@ -1028,7 +1048,13 @@
     },
     route(r) {
       if (!D) return;
-      const wanted = r.tab || 'today';
+      const TABS = ['today', 'requests', 'students', 'schedule', 'settings'];
+      let wanted = r.tab || 'today';
+      if (TABS.indexOf(wanted) < 0) {          // unknown tab in the URL: normalise it
+        wanted = 'today';
+        U.router.go('admin', wanted, '', true);
+        if (wanted === tab) { render(); return; }
+      }
       if (wanted === tab) return;
       tab = wanted;
       render();

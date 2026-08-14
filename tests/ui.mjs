@@ -36,6 +36,15 @@ let { w, errors, txt, $, $$ } = boot();
 await wait(300);
 
 ok('login screen renders', !!$('#lname'), txt().slice(0, 120));
+ok('the nav bar is hidden on the login screen', $('#nav').hidden === true);
+
+/* jsdom applies no stylesheet, so guard the two elements we toggle with the
+   `hidden` attribute: an author `display:` rule beats the browser's default
+   `[hidden] { display: none }`, which is exactly how an empty dialog and an
+   empty nav bar both ended up floating over the app. */
+const css = fs.readFileSync(dir + 'css/styles.css', 'utf8');
+ok('CSS keeps .nav[hidden] hidden', /\.nav\[hidden\]\s*\{[^}]*display:\s*none/.test(css));
+ok('CSS keeps .modal-wrap[hidden] hidden', /\.modal-wrap\[hidden\]\s*\{[^}]*display:\s*none/.test(css));
 ok('name directory is offered', $$('[data-id]').length === 6, $$('[data-id]').length);
 ok('no PIN box before a name is chosen', !$('#pin'));
 

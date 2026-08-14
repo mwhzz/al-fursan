@@ -4,7 +4,7 @@
 --  Safe to re-run. Upgrading from v1 keeps existing students/slots/attendance.
 -- =============================================================================
 
-create extension if not exists pgcrypto;
+-- gen_random_uuid() is core since PostgreSQL 13, so no extension is required.
 
 -- ----------------------------------------------------------------- tables ---
 create table if not exists app_settings (key text primary key, value text not null);
@@ -179,6 +179,10 @@ insert into admin_users (username, pass, display, role)
 select 'owner', coalesce((select value from app_settings where key='admin_password'), 'alfursan'), 'Owner', 'owner'
 where not exists (select 1 from admin_users);
 
+-- the v1 single-password setting has now been migrated into an account; don't
+-- leave a second copy of a live password lying around
+delete from app_settings where key = 'admin_password';
+
 -- ------------------------------------------------------------------ RLS -----
 alter table app_settings   enable row level security;
 alter table students       enable row level security;
@@ -212,7 +216,7 @@ $$;
 
 create or replace function public._new_token()
 returns text language sql security definer set search_path = public as $$
-  select encode(gen_random_bytes(24), 'hex');
+  select replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '');
 $$;
 
 create or replace function public._admin(p_token text)
@@ -355,8 +359,10 @@ begin
   end if;
 
   if st.id is null then
+    -- reset the counter when we lock, otherwise every later mistake re-locks
     insert into login_attempts (key, fails) values (k, 1)
-      on conflict (key) do update set fails = login_attempts.fails + 1,
+      on conflict (key) do update set
+        fails = case when login_attempts.fails + 1 >= 5 then 0 else login_attempts.fails + 1 end,
         locked_until = case when login_attempts.fails + 1 >= 5 then now() + interval '60 seconds' else null end;
     return jsonb_build_object('ok', false, 'error', 'login');
   end if;
@@ -399,11 +405,15 @@ begin
     'closures', coalesce((select jsonb_agg(jsonb_build_object(
         'date', c.date, 'slot_id', c.slot_id, 'reason', c.reason))
         from closures c where c.date >= _today()), '[]'::jsonb),
+    -- key must be exactly "<slot uuid>|YYYY-MM-DD": generate_series returns a
+    -- timestamp, and d::text would render "2026-08-14 00:00:00", which never
+    -- matches the key the client builds.
     'seats', coalesce((select jsonb_object_agg(k, v) from (
-        select (s.id::text || '|' || d::text) k,
-               jsonb_build_object('taken', _slot_taken(s.id, d), 'pending', _slot_pending(s.id, d)) v
+        select (s.id::text || '|' || d::date::text) k,
+               jsonb_build_object('taken', _slot_taken(s.id, d::date),
+                                  'pending', _slot_pending(s.id, d::date)) v
         from slots s
-        cross join generate_series(_today(), _today() + 34, interval '1 day') g(d)
+        cross join generate_series(_today()::timestamp, (_today() + 34)::timestamp, interval '1 day') g(d)
         where s.active and extract(dow from d)::int = s.day
       ) q), '{}'::jsonb),
     'schedule', _schedule()
@@ -561,8 +571,10 @@ begin
 
   select * into a from admin_users where lower(username) = lower(trim(p_user)) and pass = p_pass and active;
   if a.id is null then
+    -- reset the counter when we lock, otherwise every later mistake re-locks
     insert into login_attempts (key, fails) values (k, 1)
-      on conflict (key) do update set fails = login_attempts.fails + 1,
+      on conflict (key) do update set
+        fails = case when login_attempts.fails + 1 >= 5 then 0 else login_attempts.fails + 1 end,
         locked_until = case when login_attempts.fails + 1 >= 5 then now() + interval '60 seconds' else null end;
     return jsonb_build_object('ok', false, 'error', 'login');
   end if;
@@ -618,9 +630,12 @@ begin
       'expiring', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name, 'end_date', s.end_date))
         from students s where s.active and s.end_date is not null
           and s.end_date between d and d + 7), '[]'::jsonb),
+      -- alias must not be "a": this function declares `a admin_users`, and plpgsql
+      -- resolves a.<field> against the variable before the table, which made the
+      -- whole console fail with: record "a" has no field "student_id"
       'exhausted', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name))
         from students s where s.active and s.total_classes <=
-          (select count(*) from attendance a where a.student_id = s.id and a.status = 'present')), '[]'::jsonb),
+          (select count(*) from attendance att where att.student_id = s.id and att.status = 'present')), '[]'::jsonb),
       'unpaid', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name, 'amount', t.amt))
         from (select student_id, sum(amount) amt from payments where paid_on is null group by student_id) t
         join students s on s.id = t.student_id), '[]'::jsonb)),
@@ -1103,15 +1118,18 @@ begin
 end $$;
 
 -- --------------------------------------------------------------- grants -----
+-- PostgreSQL grants EXECUTE to PUBLIC on every new function, and PUBLIC includes
+-- anon. Revoking from anon alone leaves the privilege in place, so start by
+-- taking it away from everyone and hand it back only to the API surface below.
 do $$
 declare f text;
 begin
   for f in select 'public.' || p.proname || '(' ||
       pg_get_function_identity_arguments(p.oid) || ')'
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-    where n.nspname = 'public' and p.proname like '\_%'
+    where n.nspname = 'public' and p.prokind = 'f'
   loop
-    execute 'revoke execute on function ' || f || ' from anon, authenticated';
+    execute 'revoke all on function ' || f || ' from public, anon, authenticated';
   end loop;
 end $$;
 

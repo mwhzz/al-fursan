@@ -32,7 +32,7 @@ no build command.
 ## Connect Supabase (so every phone shares the same data)
 
 1. Create a free project at [supabase.com](https://supabase.com).
-2. **SQL Editor** → paste all of `supabase/schema.sql` → **Run**.
+2. **SQL Editor** → paste all of `supabase/schema.sql` → **Run**. No extensions needed.
    Creates the tables, RLS, all RPCs, the Fri/Sat/Mon/Wed × 4:00–7:20 PM slots,
    and one admin account: **owner / alfursan** — change it on first sign-in.
 3. **Project Settings → API** → copy `Project URL` and the `anon public` key into `js/config.js`:
@@ -126,12 +126,18 @@ logo: 'assets/logo.png'
 ## Tests
 
 ```bash
-cd tests && npm i jsdom
-node logic.mjs   # 67 checks on the RPC contract (no DOM)
-node ui.mjs      # 81 checks driving both apps through jsdom
+cd tests && npm i
+node sql.mjs     # 64 checks against real PostgreSQL (schema.sql in PGlite)
+node logic.mjs   # 67 checks on the demo backend
+node ui.mjs      # 88 checks driving both apps through jsdom
 ```
 
-`logic.mjs` runs every RPC against the demo backend — bookings, waitlist promotion,
-capacity, balances, expiry, day closures, payments, imports, lockouts, permissions.
-`ui.mjs` drives the real screens: sign-in, booking, back-button behaviour, attendance,
-approvals, rider editing, settings.
+- **`sql.mjs`** loads `supabase/schema.sql` into an actual PostgreSQL (PGlite/WASM) and
+  calls the RPCs the way PostgREST does. It exists because everything else talks to the
+  demo backend, and three bugs once shipped that only existed in SQL. It also asserts the
+  privilege model: no table readable by `anon`, RLS on everywhere, internal helpers
+  unreachable, every API function reachable.
+- **`logic.mjs`** runs the same journeys against the localStorage backend, so the two
+  stay interchangeable.
+- **`ui.mjs`** drives the real screens: sign-in, booking, back-button behaviour,
+  attendance marking, approvals, rider editing, settings.

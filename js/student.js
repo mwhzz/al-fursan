@@ -198,7 +198,7 @@
       html += '<button type="button" data-date="' + d + '" ' + (has ? '' : 'disabled ') +
         (state ? 'data-state="' + state + '" ' : '') + (d === today ? 'class="today" ' : '') +
         'aria-pressed="' + (d === pickedDate) + '" aria-label="' + U.esc(U.dateFull(d)) +
-        (has ? ' — ' + (closedAll ? t('classClosed') : t('seatsLeft', { n: free })) : '') + '">' +
+        (has ? ' — ' + (closedAll ? t('classClosed') : t('seatsLeft', { n: n(free) })) : '') + '">' +
         '<span>' + n(label) + '</span>' +
         (has && !closedAll ? '<span class="free">' + n(free) + '</span>' : '') +
         '</button>';
@@ -563,7 +563,9 @@
     async start(payload, route) {
       D = payload;
       U.setTZ(S().timezone);
-      tab = route && route.tab ? route.tab : 'overview';
+      const TABS = ['overview', 'book', 'history', 'profile'];
+      const want = route && route.tab;
+      tab = TABS.indexOf(want) >= 0 ? want : 'overview';
       render();
       refresh(true);
       document.addEventListener('visibilitychange', () => {
@@ -573,7 +575,13 @@
     },
     route(r) {
       if (!D) return;
-      const wanted = r.tab || 'overview';
+      const TABS = ['overview', 'book', 'history', 'profile'];
+      let wanted = r.tab || 'overview';
+      if (TABS.indexOf(wanted) < 0) {          // unknown tab in the URL: normalise it
+        wanted = 'overview';
+        U.router.go('student', wanted, '', true);
+        if (wanted === tab) { render(); return; }
+      }
       if (wanted === tab) return;
       tab = wanted;
       render();

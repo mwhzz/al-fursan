@@ -326,11 +326,12 @@
   }
 
   function showUpdate(worker) {
-    const el = document.getElementById('toast');
-    el.innerHTML = '';
+    if (document.getElementById('afUpdateBar')) return;
     U.toast(t('updateReady'));
-    const host = document.getElementById('app');
+    // must live outside #app — every render replaces that element's contents
+    const host = document.body;
     const bar = document.createElement('div');
+    bar.id = 'afUpdateBar';
     bar.className = 'banner info';
     bar.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--nav-h) + 70px);z-index:95;width:min(92vw,420px)';
     bar.innerHTML = UI.icon('bell') + UI.esc(t('updateReady')) +

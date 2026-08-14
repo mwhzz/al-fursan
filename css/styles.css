@@ -245,13 +245,27 @@ h3 { font-size: .98rem; font-weight: 700; letter-spacing: -.01em; }
 .panel.tight { padding: 12px 14px; }
 .hairline { height: 1px; background: var(--line); border: 0; }
 
-/* status stripe down the left edge of any card or row */
-[data-state] { box-shadow: inset var(--stripe-w) 0 0 var(--stripe, transparent), var(--shadow-1); }
+/* --------------------------------------------------------- status stripe --
+   A coloured edge on cards and rows. Drawn with a pseudo-element, not a
+   box-shadow: a shadow loses to any rule with more specificity (.panel.lead
+   did exactly that and silently removed the stripe from the two most
+   important cards). Every [data-state] also re-declares --stripe, because
+   custom properties inherit and a child would otherwise wear its parent's
+   colour.                                                                   */
+[data-state] { --stripe: var(--line-2); }
 [data-state="present"], [data-state="approved"], [data-state="paid"], [data-state="done"] { --stripe: var(--ok); }
 [data-state="pending"], [data-state="waitlist"], [data-state="partial"], [data-state="due"] { --stripe: var(--warn); }
-[data-state="absent"], [data-state="declined"], [data-state="cancelled"], [data-state="closed"], [data-state="full"] { --stripe: var(--bad); }
-[data-state="today"], [data-state="info"] { --stripe: var(--accent); }
+[data-state="absent"], [data-state="declined"], [data-state="cancelled"], [data-state="closed"],
+[data-state="full"], [data-state="expired"] { --stripe: var(--bad); }
+[data-state="makeup"], [data-state="today"], [data-state="info"] { --stripe: var(--accent); }
 [data-state="none"], [data-state="archived"] { --stripe: var(--line-2); }
+
+/* only these three wear it — never the calendar squares */
+.panel[data-state], .item[data-state], .slot[data-state] { position: relative; overflow: hidden; }
+.panel[data-state]::before, .item[data-state]::before, .slot[data-state]::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: var(--stripe-w); background: var(--stripe); pointer-events: none;
+}
 
 /* --------------------------------------------------------------- top bar --*/
 .topbar {
@@ -261,9 +275,17 @@ h3 { font-size: .98rem; font-weight: 700; letter-spacing: -.01em; }
   background: linear-gradient(180deg, var(--bg) 72%, transparent);
 }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand > div { min-width: 0; }
 .brand img { width: 38px; height: 38px; object-fit: contain; flex: none; }
-.brand-name { font-family: var(--font-display); font-size: 1.1rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
-.brand-sub { font-size: .6875rem; letter-spacing: .18em; text-transform: uppercase; color: var(--txt-3); font-weight: 600; }
+.brand-name {
+  font-family: var(--font-display); font-size: 1.1rem; font-weight: 800;
+  letter-spacing: -.02em; line-height: 1.15;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.brand-sub {
+  font-size: .6875rem; letter-spacing: .18em; text-transform: uppercase; color: var(--txt-3);
+  font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* --------------------------------------------------------------- buttons --*/
 .btn {
@@ -427,13 +449,14 @@ button.item:active { transform: scale(.99); }
   letter-spacing: -.02em;
 }
 .avatar.sm { width: 28px; height: 28px; font-size: .75rem; }
-.avatar.muted { background: var(--surface-3); color: var(--txt-2); }
-.avatar.ok { background: var(--ok); color: var(--ok-ink); }
-.avatar.bad { background: var(--bad); color: var(--bad-ink); }
-/* rider identity: the course hue follows them everywhere */
+/* rider identity: the course hue follows them everywhere… */
 .avatar[data-course="basic"] { background: var(--basic); color: var(--accent-ink); }
 .avatar[data-course="advanced"] { background: var(--advanced); color: var(--accent-ink); }
 .avatar[data-course="private"] { background: var(--private); color: var(--accent-ink); }
+/* …until a status takes over, so these must come last to win the cascade */
+.avatar.muted { background: var(--surface-3); color: var(--txt-2); }
+.avatar.ok { background: var(--ok); color: var(--ok-ink); }
+.avatar.bad { background: var(--bad); color: var(--bad-ink); }
 
 .progress { height: 7px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
 .progress > i { display: block; height: 100%; border-radius: 99px; background: var(--accent); transition: width .8s var(--ease); }
@@ -500,6 +523,8 @@ button.item:active { transform: scale(.99); }
   background: var(--surface); border: 1.5px solid var(--line-2); box-shadow: var(--shadow-2);
   max-width: calc(100vw - 20px); overflow-x: auto; scrollbar-width: none;
 }
+/* must beat the `display: flex` above, or the empty bar floats over the login screen */
+.nav[hidden] { display: none; }
 .nav::-webkit-scrollbar { display: none; }
 .nav button {
   display: grid; place-items: center; gap: 3px; padding: 8px 13px; border: 0; border-radius: 999px;

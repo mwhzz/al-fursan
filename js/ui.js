@@ -312,9 +312,12 @@
     return '<img src="' + esc(src) + '" alt="" class="' + cls + '">';
   }
 
-  function avatar(name, cls, course) {
+  /** avatar(name, cls, course, courseWas) — courseWas remembers the hue to
+      restore when a status class is later cleared */
+  function avatar(name, cls, course, courseWas) {
     return '<span class="avatar ' + (cls || '') + '"' +
       (course ? ' data-course="' + esc(course) + '"' : '') +
+      (courseWas ? ' data-course-was="' + esc(courseWas) + '"' : '') +
       ' aria-hidden="true">' + esc(initials(name)) + '</span>';
   }
 
