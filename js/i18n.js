@@ -20,6 +20,7 @@
       lockedOut: 'Too many tries. Wait {n} seconds.', forgotPin: 'Forgot your PIN?',
       forgotHelp: 'Ask the academy to reset it', callAcademy: 'Call the academy',
       whatsappAcademy: 'Message on WhatsApp', noContactSet: 'No contact number saved yet',
+      demoMode: 'Demo mode — this browser only, not the academy data.',
       keepSignedIn: 'Keep me signed in', sharedDevice: 'Shared device — sign me out on close',
       showPin: 'Show PIN', hidePin: 'Hide PIN',
 
@@ -152,7 +153,7 @@
       lockedOut: 'অনেকবার ভুল হয়েছে। {n} সেকেন্ড অপেক্ষা করুন।', forgotPin: 'পিন ভুলে গেছেন?',
       forgotHelp: 'একাডেমিকে বলুন পিন রিসেট করতে', callAcademy: 'একাডেমিতে ফোন করুন',
       whatsappAcademy: 'হোয়াটসঅ্যাপে মেসেজ', noContactSet: 'এখনো কোনো নম্বর দেওয়া হয়নি',
-      keepSignedIn: 'লগইন থাকুক', sharedDevice: 'সবার ডিভাইস — বন্ধ করলে লগআউট',
+      demoMode: 'ডেমো মোড — শুধু এই ব্রাউজারে, একাডেমির আসল ডেটা নয়।', keepSignedIn: 'লগইন থাকুক', sharedDevice: 'সবার ডিভাইস — বন্ধ করলে লগআউট',
       showPin: 'পিন দেখান', hidePin: 'পিন লুকান',
 
       overview: 'হোম', schedule: 'বুক', history: 'হিস্ট্রি', profile: 'প্রোফাইল',

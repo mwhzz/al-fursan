@@ -4,7 +4,9 @@
    app (and the test suite) runs with nothing behind it.
 -------------------------------------------------------------------------*/
 (function () {
-  const KEY = 'af_demo_db_v2';
+  /* Bump this whenever the seed changes. A browser that kept an older copy
+     would otherwise keep signing people in against stale accounts and data. */
+  const KEY = 'af_demo_db_v3';
   let db = null;
   let handlers = null;
 
@@ -12,6 +14,11 @@
 
   function load() {
     try {
+      // drop databases from earlier seeds so nobody is stuck on old accounts
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf('af_demo_db_') === 0 && k !== KEY) { localStorage.removeItem(k); i--; }
+      }
       const raw = localStorage.getItem(KEY);
       if (raw) return JSON.parse(raw);
     } catch (e) { /* corrupt or unavailable: start fresh */ }

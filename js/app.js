@@ -103,7 +103,13 @@
             U.esc(isStaff ? t('riderLogin') : t('staffLogin')) + '</button>' +
         '</div>' +
 
-        (API.LIVE ? '' : '<p class="tiny dim" style="margin-top:14px">Demo · Zawad / 1111 · staff: owner / alfursan</p>') +
+        /* Say plainly which backend answered. Without this, a site that cannot
+           reach its function looks identical to one that can — and the accounts
+           are different, so "the password is wrong" is all you see. */
+        (API.backend === 'demo'
+          ? '<div class="banner warn" style="margin-top:16px;text-align:left">' + U.icon('alert') +
+            '<span>' + U.esc(t('demoMode')) + '<br><b>Zawad / 1111</b> · staff <b>owner / alfursan</b></span></div>'
+          : '') +
       '</div></div>';
 
     document.getElementById('nav').hidden = true;

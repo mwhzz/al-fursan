@@ -21,7 +21,7 @@ function boot(carryDb) {
   const errors = [];
   w.onerror = m => errors.push(String(m));
   w.addEventListener('unhandledrejection', e => errors.push('rejection: ' + (e.reason && e.reason.message)));
-  if (carryDb) w.localStorage.setItem('af_demo_db_v2', carryDb);
+  if (carryDb) w.localStorage.setItem('af_demo_db_v3', carryDb);
   for (const f of FILES) {
     const s = w.document.createElement('script');
     s.textContent = fs.readFileSync(dir + f, 'utf8');
@@ -121,7 +121,7 @@ while (!$('#modal').hidden && guideSteps++ < 20) { $('.modal #gNext').click(); a
 await wait(400);
 ok('clicking through finishes the guide', $('#modal').hidden === true, guideSteps);
 ok('the guide is remembered as seen',
-  JSON.parse(w.localStorage.getItem('af_demo_db_v2')).students.find(s => s.name === 'Zawad').guide === 1);
+  JSON.parse(w.localStorage.getItem('af_demo_db_v3')).students.find(s => s.name === 'Zawad').guide === 1);
 
 /* ---- booking ---- */
 $('[data-tab="book"]').click();
@@ -192,7 +192,7 @@ ok('bangla switches the whole app', /[\u0980-\u09FF]{3,}/.test(txt()), txt().sli
 $('[data-uilang="en"]').click();
 await wait(150);
 
-const carry = w.localStorage.getItem('af_demo_db_v2');
+const carry = w.localStorage.getItem('af_demo_db_v3');
 ok('rider flow raised no JS errors', errors.length === 0, errors.join(' | '));
 
 /* ============================== ADMIN ============================== */
@@ -370,7 +370,7 @@ ok('the reopened guide has a close button that draws its icon',
 ok('don\'t-show-again sits inside the dialog body', !!$('.modal .modal-body #gNever'));
 $('.modal #gNever').click();
 await wait(500);
-const signedIn = () => JSON.parse(w.localStorage.getItem('af_demo_db_v2'))
+const signedIn = () => JSON.parse(w.localStorage.getItem('af_demo_db_v3'))
   .admins.find(a => a.username === 'owner');
 ok('muting the guide closes it and is remembered',
   $('#modal').hidden === true && signedIn().guide === 2, signedIn().guide);

@@ -46,8 +46,8 @@ const locked = await call('student_login', { p_id: zawad.id, p_pin: '0000' });
 ok('locks out after 5 wrong PINs', locked.error === 'locked' && locked.seconds > 0, locked);
 
 // clear the lock for the rest of the run
-const db = () => JSON.parse(localStorage.getItem('af_demo_db_v2'));
-const raw = db(); raw.attempts = {}; localStorage.setItem('af_demo_db_v2', JSON.stringify(raw));
+const db = () => JSON.parse(localStorage.getItem('af_demo_db_v3'));
+const raw = db(); raw.attempts = {}; localStorage.setItem('af_demo_db_v3', JSON.stringify(raw));
 ctx.DEMO.reset();
 const bs2 = await call('bootstrap', {});
 const zid = bs2.directory.find(x => x.name === 'Zawad').id;
