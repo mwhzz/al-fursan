@@ -20,5 +20,5 @@ window.AF_CONFIG = {
   // assets/logo.png rekhe niche path ta bodle dao.
   logo: 'assets/icon.svg',
 
-  version: '2.0.0'
+  version: '2.1.0'
 };

@@ -3,7 +3,10 @@
 Rider portal + academy console. Installable PWA, works offline for reading,
 English / বাংলা, light and dark themes, no build step (plain HTML/CSS/JS).
 
-**v2.0.0** — rebuilt end to end against [docs/UX-AUDIT.md](docs/UX-AUDIT.md) (all 62 findings fixed).
+**v2.1.0** — rebuilt end to end against [docs/UX-AUDIT.md](docs/UX-AUDIT.md) (all 62 findings fixed).
+
+📖 **[docs/GUIDE.md](docs/GUIDE.md) — what riders and the academy can do, and how.**
+The app also walks you through it on first sign-in.
 
 ---
 
@@ -73,17 +76,26 @@ Telegram setup (2 minutes, once):
 
 **Rider** — see cycle progress and classes left · next class with countdown, coach and horse ·
 book any date from a 5-week calendar with live seat counts · join a waitlist when full ·
-report "can't attend" · cancel (up to the cut-off) · month-grouped history · fees and receipts ·
-change own phone and PIN · install the app.
+report "can't attend" · cancel (up to the cut-off) · month-grouped history · fees with
+every instalment listed · change own phone and PIN · install the app.
 
-**Owner / staff** — mark present / absent / clear with one tap and no scroll jump ·
-"all present" per slot · step through days with arrows · print the day sheet ·
-approve, decline (with a reason) or bulk-approve requests, each shown with the rider's
-balance, expiry and clashes · full rider detail: history, bookings, payments, share PIN
-over WhatsApp · add / pause / delete class times with coach and horse · cancel a single
-day or a single slot (everyone booked is told) · record fees · attention list for expiring
-courses, exhausted balances and unpaid fees · export **and restore** backups ·
-named staff accounts, password change, activity log.
+**Owner / staff** — mark present / absent / make-up with one tap and no scroll jump ·
+"all present" per slot · add a walk-in to today's class · search the whole day ·
+step through days with arrows · print the day sheet · approve, decline (with a reason) or
+bulk-approve requests, each shown with the rider's balance, expiry, clashes and whether
+the class is full · full rider detail: history, bookings, fees, share PIN over WhatsApp ·
+**renew a course in one tap** · **fees paid in instalments**, priced per course ·
+add / pause / delete class times with coach and horse · cancel a single day or a single
+slot (everyone booked is told) · attention list for expiring courses, exhausted balances
+and unpaid fees · export **and restore** backups · named staff accounts, password change,
+activity log.
+
+## Fees
+
+Course prices are set once in Settings — Basic ৳5,500, Advanced ৳12,000, Private ৳15,000
+by default. A fee is raised per cycle and **paid in as many instalments as the rider
+needs**: each payment is recorded with its date and method, the app refuses anything above
+what is owed, and both sides see the same running balance.
 
 ## Structure
 

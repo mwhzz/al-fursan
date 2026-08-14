@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const dir = fileURLToPath(new URL('../', import.meta.url));
-const FILES = ['js/config.js', 'js/i18n.js', 'js/demo.js', 'js/api.js', 'js/ui.js',
+const FILES = ['js/config.js', 'js/i18n.js', 'js/demo.js', 'js/api.js', 'js/ui.js', 'js/guide.js',
   'js/student.js', 'js/admin.js', 'js/app.js'];
 
 let pass = 0, fail = 0;
@@ -107,6 +107,20 @@ ok('progress ring drawn', !!$('.ring .bar'));
 ok('next class card shown', txt().includes('Next class'));
 ok('rider nav has 4 tabs', $$('#nav button').length === 4, $$('#nav button').length);
 
+/* ---- the walkthrough: first run cannot be skipped ---- */
+ok('the guide opens on the first sign-in', !$('#modal').hidden && !!$('.modal #gNext'));
+ok('the first run has no close button', !$('.modal [data-close]'));
+ok('the first run offers no skip', !$('.modal #gSkip') && !$('.modal #gNever'));
+w.history.back();
+await wait(150);
+ok('back does not dismiss the first run', !$('#modal').hidden);
+let guideSteps = 0;
+while (!$('#modal').hidden && guideSteps++ < 20) { $('.modal #gNext').click(); await wait(60); }
+await wait(400);
+ok('clicking through finishes the guide', $('#modal').hidden === true, guideSteps);
+ok('the guide is remembered as seen',
+  JSON.parse(w.localStorage.getItem('af_demo_db_v2')).students.find(s => s.name === 'Zawad').guide === 1);
+
 /* ---- booking ---- */
 $('[data-tab="book"]').click();
 await wait(200);
@@ -195,10 +209,17 @@ $('#auser').value = 'owner';
 $('#apass').value = 'alfursan';
 $('#ago').click();
 await wait(800);
+/* the owner gets their own first-run walkthrough */
+ok('the console guide opens on first sign-in', !$('#modal').hidden && !!$('.modal #gNext'));
+let aSteps = 0;
+while (!$('#modal').hidden && aSteps++ < 20) { $('.modal #gNext').click(); await wait(60); }
+await wait(400);
+ok('the console guide can be completed', $('#modal').hidden === true, aSteps);
+
 ok('console loads', txt().includes('Console'), txt().slice(0, 140));
 ok('admin nav has 5 tabs', $$('#nav button').length === 5, $$('#nav button').length);
 ok('day navigation present', !!$('#prevDay') && !!$('#nextDay') && !!$('#todayBtn'));
-ok('income stat shown', txt().includes('BDT'), txt().slice(0, 250));
+ok('income is shown with the currency symbol', txt().includes('৳'), txt().slice(0, 250));
 
 /* ---- attendance: 3 states, no scroll jump, optimistic ---- */
 // move to a day that has classes
@@ -264,7 +285,10 @@ await wait(600);
 ok('rider detail opens with history', !$('#modal').hidden && $('.modal').textContent.includes('History'),
   $('.modal').textContent.slice(0, 200));
 ok('detail shows the PIN to share', $('.modal').textContent.includes('PIN'));
-ok('detail offers payments', !!$('.modal #payBtn'));
+ok('detail offers fees and renewal', !!$('.modal #invBtn') && !!$('.modal #renewBtn'));
+ok('detail shows the fee with what is left to pay',
+  $('.modal').textContent.includes('Still to pay'), $('.modal').textContent.slice(0, 260));
+ok('a part payment can be recorded from the detail', !!$('.modal [data-pay]'));
 
 // Regression: detail -> edit must SWAP the dialog, not close+reopen. Closing pushed a
 // history.back() whose popstate landed after the edit form opened and shut it again,

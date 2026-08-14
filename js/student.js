@@ -318,9 +318,37 @@
   }
 
   /* -------------------------------------------------------- profile view --*/
+  /** one fee, what has been paid against it, and every instalment */
+  function invoiceCard(inv) {
+    const total = Number(inv.total) || 0;
+    const paid = Number(inv.paid) || 0;
+    const left = Math.max(0, total - paid);
+    const pct = total ? Math.min(1, paid / total) : 0;
+    const entries = inv.entries || [];
+
+    return '<div class="panel flat" data-state="' + (left === 0 ? 'paid' : 'due') + '">' +
+      '<div class="spread"><div>' +
+        '<div style="font-weight:700">' + U.esc(inv.title || t('invoice')) + ' · ' + U.esc(U.money(total, cur())) + '</div>' +
+        '<div class="tiny dim">' + U.esc(inv.due_date ? t('dueOn', { d: U.dateLabel(inv.due_date) }) : '') + '</div>' +
+      '</div>' + U.badge(left === 0 ? t('fullyPaid') : t('remaining2') + ' ' + U.money(left, cur()),
+        left === 0 ? 'ok' : 'wait', true) + '</div>' +
+      '<div class="progress ' + (left === 0 ? 'ok' : 'warn') + '" style="margin:10px 0 6px">' +
+        '<i style="width:' + (pct * 100).toFixed(0) + '%"></i></div>' +
+      '<div class="tiny dim">' + U.esc(t('paidSoFar')) + ': ' + U.esc(U.money(paid, cur())) + '</div>' +
+      (entries.length
+        ? '<div class="list" style="margin-top:10px">' + entries.map(e =>
+            '<div class="item" data-state="paid" style="padding:8px 12px">' +
+            '<span class="avatar sm ok">' + U.icon('cash') + '</span>' +
+            '<div class="grow"><div style="font-weight:650">' + U.esc(U.money(e.amount, cur())) + '</div>' +
+            '<div class="tiny dim">' + U.esc(U.dateLabel(e.paid_on)) +
+              (e.method ? ' · ' + U.esc(e.method) : '') + '</div></div></div>').join('') + '</div>'
+        : '<p class="tiny dim" style="margin-top:8px">' + U.esc(t('noInstalments')) + '</p>') +
+      '</div>';
+  }
+
   function profileView() {
     const s = D.student;
-    const pays = D.payments || [];
+    const pays = D.invoices || [];
     return '<div class="stack view">' +
       '<section class="panel"><div class="upper" style="margin-bottom:12px">' + U.esc(t('myProfile')) + '</div>' +
         '<div class="stack">' +
@@ -333,13 +361,8 @@
 
       '<section class="panel"><div class="spread" style="margin-bottom:10px">' +
         '<span class="upper">' + U.esc(t('fees')) + '</span>' +
-        (s.unpaid > 0 ? U.badge(t('due') + ' ' + U.money(s.unpaid, cur()), 'wait') : '') + '</div>' +
-        (pays.length ? '<div class="list">' + pays.map(p =>
-          '<div class="item"><span class="avatar sm ' + (p.paid_on ? 'ok' : 'muted') + '">' + U.icon('cash') + '</span>' +
-          '<div class="grow"><div style="font-weight:650">' + U.esc(U.money(p.amount, cur())) + '</div>' +
-          '<div class="tiny dim">' + U.esc(p.paid_on ? t('paidOn', { d: U.dateLabel(p.paid_on) })
-            : p.due_date ? t('dueOn', { d: U.dateLabel(p.due_date) }) : '') + '</div></div>' +
-          U.badge(p.paid_on ? t('paid') : t('unpaid'), p.paid_on ? 'ok' : 'wait', true) + '</div>').join('') + '</div>'
+        (s.unpaid > 0 ? U.badge(t('due') + ' ' + U.money(s.unpaid, cur()), 'wait', true) : '') + '</div>' +
+        (pays.length ? '<div class="stack sm">' + pays.map(invoiceCard).join('') + '</div>'
           : '<p class="small dim">' + U.esc(t('noFees')) + '</p>') +
       '</section>' +
 
@@ -363,6 +386,7 @@
       (phone ? '<a class="btn ghost block" href="tel:' + U.esc(phone) + '">' + U.esc(t('callAcademy')) + '</a>' : '') +
       (wa ? '<a class="btn ghost block" target="_blank" rel="noopener" href="https://wa.me/' +
         U.esc(String(wa).replace(/[^0-9]/g, '')) + '">' + U.esc(t('whatsappAcademy')) + '</a>' : '') +
+      '<button class="btn ghost block" id="guideBtn">' + U.esc(t('guideAgain')) + '</button>' +
       '<button class="btn ghost block" id="installBtn">' + U.esc(t('installApp')) + '</button>' +
       '<button class="btn ghost block" id="logout">' + U.esc(t('logout')) + '</button>' +
       '<p class="tiny dim center">' + U.esc(S().academy_name || 'Al Fursan') + ' · v' +
@@ -546,6 +570,7 @@
       await API.logout(); API.session.clear(); location.hash = ''; location.reload();
     });
     const ib = $('#installBtn'); if (ib) ib.addEventListener('click', () => window.AF_INSTALL && window.AF_INSTALL());
+    const gb = $('#guideBtn'); if (gb) gb.addEventListener('click', () => GUIDE.open('student'));
     const read = $('#readAll');
     if (read) read.addEventListener('click', async () => {
       await API.markNotificationsRead();
@@ -568,6 +593,8 @@
       const want = route && route.tab;
       tab = TABS.indexOf(want) >= 0 ? want : 'overview';
       render();
+      // first sign-in: the walkthrough is not skippable
+      GUIDE.maybeShow('student', D.student.guide);
       refresh(true);
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden && D && Date.now() - lastSync > 30000) refresh(true);

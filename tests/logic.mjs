@@ -57,7 +57,7 @@ const TOK = login.token;
 
 const sess = await call('student_session', { p_token: TOK });
 ok('session payload complete', sess.ok && sess.student && sess.schedule.length === 20 &&
-  sess.seats && sess.notifications && sess.payments.length === 1, Object.keys(sess));
+  sess.seats && sess.notifications && sess.invoices.length === 1, Object.keys(sess));
 ok('session rejects a bad token', !(await call('student_session', { p_token: 'nope' })).ok);
 ok('other riders PINs are not exposed', sess.student.pin === undefined &&
   JSON.stringify(sess.schedule).indexOf('"pin"') === -1);
@@ -194,17 +194,45 @@ ok('coach and horse saved', paused.coach === 'Rakib' && paused.horse === 'Storm'
 const zs2 = await call('student_session', { p_token: TOK });
 ok('paused slot hidden from riders', !zs2.schedule.some(s => s.id === slot.id));
 
-/* ------------------------------------------------------------- payments */
-const pay = await call('admin_save_payment', { p_token: A, p_data: { student_id: zid, amount: 5000, due_date: today } });
-ok('payment created', pay.ok);
+/* ------------------------------------------- fees, paid in instalments */
+const owedBy = o => Number(o.students.find(s => s.id === zid).unpaid);
 ov = await call('admin_session', { p_token: A });
-ok('unpaid shows on the rider', ov.students.find(s => s.id === zid).unpaid === 9000,
-  ov.students.find(s => s.id === zid).unpaid);
-ok('unpaid alert raised', (ov.alerts.unpaid || []).some(x => x.id === zid));
-await call('admin_save_payment', { p_token: A, p_data: { id: pay.id, student_id: zid, amount: 5000, paid_on: today } });
+ok('the seeded fee shows what is still owed', owedBy(ov) === 3500, owedBy(ov));
+
+const inv2 = await call('admin_save_invoice', {
+  p_token: A, p_data: { student_id: zid, title: 'Extra', total: 2000, due_date: today }
+});
 ov = await call('admin_session', { p_token: A });
-ok('marking paid clears that amount', ov.students.find(s => s.id === zid).unpaid === 4000);
-ok('income counted this month', ov.stats.month_income === 5000, ov.stats.month_income);
+ok('a second fee adds to what is owed', inv2.ok && owedBy(ov) === 5500, owedBy(ov));
+
+const part = await call('admin_save_payment', { p_token: A, p_data: { invoice_id: inv2.id, amount: 500 } });
+ok('a part payment reports the remainder', part.ok && Number(part.remaining) === 1500, part);
+ov = await call('admin_session', { p_token: A });
+ok('the balance drops by the amount received', owedBy(ov) === 5000, owedBy(ov));
+
+const tooMuch = await call('admin_save_payment', { p_token: A, p_data: { invoice_id: inv2.id, amount: 9999 } });
+ok('more than owed is refused', tooMuch.error === 'over' && Number(tooMuch.remaining) === 1500, tooMuch);
+
+await call('admin_save_payment', { p_token: A, p_data: { invoice_id: inv2.id, amount: 1500 } });
+ov = await call('admin_session', { p_token: A });
+ok('the fee clears when fully paid', owedBy(ov) === 3500, owedBy(ov));
+
+const zSess = await call('student_session', { p_token: TOK });
+const extra = zSess.invoices.find(i => i.title === 'Extra');
+ok('the rider sees every instalment', extra && extra.entries.length === 2 && Number(extra.paid) === 2000, extra);
+
+/* renewal starts a cycle and bills it */
+const beforeRenew = ov.students.find(s => s.id === zid).total_classes;
+const rn = await call('admin_renew', { p_token: A, p_student: zid });
+ov = await call('admin_session', { p_token: A });
+ok('renewing adds classes and a fee at the course price',
+  rn.ok && ov.students.find(s => s.id === zid).total_classes === beforeRenew + 8 && owedBy(ov) === 3500 + 5500,
+  { before: beforeRenew, owed: owedBy(ov) });
+
+/* the guide flag */
+ok('a rider starts without having seen the guide', zSess.student.guide === 0, zSess.student.guide);
+await call('set_guide', { p_token: TOK, p_value: 2 });
+ok('muting the guide sticks', (await call('student_session', { p_token: TOK })).student.guide === 2);
 
 /* ---------------------------------------------------- profile self-serve */
 const up = await call('student_update', { p_token: TOK, p_phone: '01700000000', p_pin: '4321' });

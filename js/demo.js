@@ -53,9 +53,15 @@
       }
     });
 
+    // one invoice, part paid — the normal case at an academy
+    const invoices = [{
+      id: uid(), student_id: students[0].id, title: 'Basic', course: 'basic', total: 5500,
+      due_date: iso(addDays(t, 6)), cycle_start: start, cycle_end: iso(addDays(t, 18)),
+      note: '', created_at: nowISO()
+    }];
     const payments = [{
-      id: uid(), student_id: students[0].id, amount: 4000, due_date: iso(addDays(t, 6)),
-      paid_on: null, cycle_start: start, cycle_end: iso(addDays(t, 18)), method: '', note: ''
+      id: uid(), student_id: students[0].id, invoice_id: invoices[0].id, amount: 2000,
+      paid_on: iso(addDays(t, -3)), method: 'cash', note: '', created_at: nowISO()
     }];
 
     return {
@@ -63,9 +69,10 @@
         academy_name: 'Al Fursan Equestrian Academy', timezone: 'Asia/Dhaka',
         contact_phone: '', whatsapp: '', currency: 'BDT', capacity: '3',
         reply_hours: '24', cancel_cutoff_h: '3', directory: 'on',
+        price_basic: '5500', price_advanced: '12000', price_private: '15000',
         telegram_token: '', telegram_chat: ''
       },
-      students, slots, link, attendance, payments,
+      students, slots, link, attendance, invoices, payments,
       bookings: [], closures: [], notifications: [],
       admins: [{ id: uid(), username: 'owner', pass: 'alfursan', display: 'Owner', role: 'owner', active: true }],
       sessions: {}, activity: [], errors: [], attempts: {}
@@ -94,8 +101,23 @@
 
   const doneCount = id => DB().attendance.filter(a => a.student_id === id && a.status === 'present').length;
   const absentCount = id => DB().attendance.filter(a => a.student_id === id && a.status === 'absent').length;
-  const unpaidOf = id => DB().payments.filter(p => p.student_id === id && !p.paid_on)
+  // billed minus received, so part payments show the real remainder
+  const unpaidOf = id => Math.max(0,
+    (DB().invoices || []).filter(i => i.student_id === id).reduce((s, i) => s + Number(i.total || 0), 0) -
+    DB().payments.filter(p => p.student_id === id).reduce((s, p) => s + Number(p.amount || 0), 0));
+
+  const paidOn = invoiceId => DB().payments.filter(p => p.invoice_id === invoiceId)
     .reduce((s, p) => s + Number(p.amount || 0), 0);
+
+  const invoicesOf = id => (DB().invoices || []).filter(i => i.student_id === id)
+    .map(i => Object.assign({}, i, {
+      paid: paidOn(i.id),
+      entries: DB().payments.filter(p => p.invoice_id === i.id)
+        .sort((a, b) => String(a.paid_on).localeCompare(String(b.paid_on)))
+    }))
+    .sort((a, b) => String(b.due_date || b.created_at).localeCompare(String(a.due_date || a.created_at)));
+
+  const priceOf = course => Number(setting('price_' + (course || 'basic'), '0')) || 0;
 
   const riders = slotId => DB().link.filter(l => l.slot_id === slotId)
     .map(l => DB().students.find(s => s.id === l.student_id)).filter(Boolean)
@@ -141,7 +163,8 @@
       done: doneCount(s.id), absent: absentCount(s.id),
       cycle_done: DB().attendance.filter(a => a.student_id === s.id && a.status === 'present'
         && a.date >= s.start_date).length,
-      unpaid: unpaidOf(s.id)
+      unpaid: unpaidOf(s.id),
+      guide: s.guide || 0
     };
     if (forAdmin) o.pin = s.pin;
     return o;
@@ -153,7 +176,11 @@
     contact_phone: setting('contact_phone'), whatsapp: setting('whatsapp'),
     currency: setting('currency', 'BDT'), capacity: setting('capacity', '3'),
     reply_hours: setting('reply_hours', '24'), cancel_cutoff_h: setting('cancel_cutoff_h', '3'),
-    directory: setting('directory', 'on'), today: today()
+    directory: setting('directory', 'on'),
+    price_basic: setting('price_basic', '5500'),
+    price_advanced: setting('price_advanced', '12000'),
+    price_private: setting('price_private', '15000'),
+    today: today()
   });
 
   const DENY = { ok: false, error: 'auth' };
@@ -254,7 +281,7 @@
             const sl = DB().slots.find(x => x.id === b.slot_id) || {};
             return Object.assign({}, b, { time: sl.time, day: sl.day });
           }).sort((a, b) => b.date.localeCompare(a.date)),
-        payments: DB().payments.filter(p => p.student_id === s.id),
+        invoices: invoicesOf(s.id),
         notifications: DB().notifications.filter(x => x.student_id === s.id).slice(0, 40),
         closures: DB().closures.filter(c => c.date >= today()),
         seats,
@@ -381,7 +408,7 @@
         .sort((x, y) => x.name.localeCompare(y.name));
       return {
         ok: true,
-        admin: { id: a.id, username: a.username, display: a.display, role: a.role },
+        admin: { id: a.id, username: a.username, display: a.display, role: a.role, guide: a.guide || 0 },
         settings: Object.assign(publicSettings(), {
           telegram_token: setting('telegram_token'), telegram_chat: setting('telegram_chat') }),
         students,
@@ -392,7 +419,7 @@
           const st = DB().students.find(x => x.id === b.student_id) || {};
           return Object.assign({}, b, { time: sl.time, day: sl.day, student: st.name });
         }).sort((x, y) => String(y.created_at).localeCompare(String(x.created_at))),
-        payments: DB().payments.slice(),
+        invoices: (DB().invoices || []).map(i => Object.assign({}, i, { paid: paidOn(i.id) })),
         closures: DB().closures.filter(c => c.date >= iso(addDays(new Date(), -30))),
         admins: DB().admins.map(u => ({ id: u.id, username: u.username, display: u.display,
           role: u.role, active: u.active !== false })),
@@ -403,7 +430,8 @@
             s.end_date <= iso(addDays(new Date(), 7))).map(s => ({ id: s.id, name: s.name, end_date: s.end_date })),
           exhausted: students.filter(s => s.active && s.done >= s.total_classes)
             .map(s => ({ id: s.id, name: s.name })),
-          unpaid: students.filter(s => s.unpaid > 0).map(s => ({ id: s.id, name: s.name, amount: s.unpaid }))
+          unpaid: students.filter(s => s.active && s.unpaid > 0)
+            .map(s => ({ id: s.id, name: s.name, amount: s.unpaid }))
         },
         stats: {
           students: DB().students.filter(s => s.active !== false).length,
@@ -428,7 +456,7 @@
           const sl = DB().slots.find(x => x.id === b.slot_id) || {};
           return Object.assign({}, b, { time: sl.time });
         }).sort((x, y) => y.date.localeCompare(x.date)),
-        payments: DB().payments.filter(p => p.student_id === p_id),
+        invoices: invoicesOf(p_id),
         slots: DB().link.filter(l => l.student_id === p_id)
           .map(l => DB().slots.find(s2 => s2.id === l.slot_id)).filter(Boolean)
           .map(s2 => ({ id: s2.id, day: s2.day, time: s2.time }))
@@ -465,6 +493,7 @@
       db.link = DB().link.filter(l => l.student_id !== p_id);
       db.attendance = DB().attendance.filter(x => x.student_id !== p_id);
       db.bookings = DB().bookings.filter(x => x.student_id !== p_id);
+      db.invoices = (DB().invoices || []).filter(x => x.student_id !== p_id);
       db.payments = DB().payments.filter(x => x.student_id !== p_id);
       db.notifications = DB().notifications.filter(x => x.student_id !== p_id);
       log(a.username, 'student.delete', s.name);
@@ -620,21 +649,104 @@
       return { ok: true };
     },
 
+    admin_save_invoice({ p_token, p_data }) {
+      const a = adminOf(p_token);
+      if (!a) return DENY;
+      const d = p_data;
+      const total = Number(d.total) || 0;
+      if (total <= 0) return { ok: false, error: 'amount' };
+      let i = (DB().invoices || []).find(x => x.id === d.id);
+      if (!i) {
+        i = { id: uid(), student_id: d.student_id, created_at: nowISO() };
+        DB().invoices.push(i);
+        notify(d.student_id, 'invoice', 'New fee', setting('currency', 'BDT') + ' ' + total);
+      }
+      Object.assign(i, {
+        title: d.title || '', course: d.course || '', total,
+        due_date: d.due_date || null, cycle_start: d.cycle_start || null,
+        cycle_end: d.cycle_end || null, note: d.note || ''
+      });
+      log(a.username, 'invoice.save', String(total));
+      commit();
+      return { ok: true, id: i.id };
+    },
+
+    admin_delete_invoice({ p_token, p_id }) {
+      const a = adminOf(p_token);
+      if (!a) return DENY;
+      db.invoices = (DB().invoices || []).filter(i => i.id !== p_id);
+      db.payments = DB().payments.filter(p => p.invoice_id !== p_id);
+      log(a.username, 'invoice.delete', '');
+      commit();
+      return { ok: true };
+    },
+
+    /** one instalment against an invoice — fees are paid in parts */
     admin_save_payment({ p_token, p_data }) {
       const a = adminOf(p_token);
       if (!a) return DENY;
       const d = p_data;
+      const amount = Number(d.amount) || 0;
+      if (amount <= 0) return { ok: false, error: 'amount' };
+      const inv = (DB().invoices || []).find(x => x.id === d.invoice_id);
+      if (!inv) return { ok: false, error: 'invoice' };
+
+      const already = DB().payments
+        .filter(p => p.invoice_id === inv.id && p.id !== d.id)
+        .reduce((s, p) => s + Number(p.amount || 0), 0);
+      if (already + amount > Number(inv.total)) {
+        return { ok: false, error: 'over', remaining: Number(inv.total) - already };
+      }
+
       let p = DB().payments.find(x => x.id === d.id);
       if (!p) { p = { id: uid(), created_at: nowISO() }; DB().payments.push(p); }
-      Object.assign(p, { student_id: d.student_id, amount: Number(d.amount) || 0,
-        due_date: d.due_date || null, paid_on: d.paid_on || null,
-        cycle_start: d.cycle_start || null, cycle_end: d.cycle_end || null,
-        method: d.method || '', note: d.note || '' });
-      if (p.paid_on) notify(p.student_id, 'payment', 'Payment received',
-        setting('currency', 'BDT') + ' ' + p.amount);
-      log(a.username, 'payment.save', String(p.amount));
+      Object.assign(p, {
+        student_id: inv.student_id, invoice_id: inv.id, amount,
+        paid_on: d.paid_on || today(), method: d.method || '', note: d.note || ''
+      });
+      const left = Number(inv.total) - (already + amount);
+      notify(inv.student_id, 'payment', 'Payment received',
+        setting('currency', 'BDT') + ' ' + amount +
+        (left > 0 ? ' · ' + setting('currency', 'BDT') + ' ' + left + ' left' : ' · fully paid'));
+      log(a.username, 'payment.save', String(amount));
       commit();
-      return { ok: true, id: p.id };
+      return { ok: true, id: p.id, remaining: left };
+    },
+
+    admin_renew({ p_token, p_student, p_amount }) {
+      const a = adminOf(p_token);
+      if (!a) return DENY;
+      const s = DB().students.find(x => x.id === p_student);
+      if (!s) return { ok: false, error: 'missing' };
+      const classes = s.course === 'advanced' ? 16 : s.course === 'private' ? 12 : 8;
+      const months = s.course === 'advanced' ? 2 : 1;
+      const end = new Date(); end.setMonth(end.getMonth() + months);
+      const total = p_amount != null ? Number(p_amount) : priceOf(s.course);
+
+      s.start_date = today();
+      s.end_date = iso(end);
+      s.total_classes = (s.total_classes || 0) + classes;
+      s.active = true;
+
+      let invId = null;
+      if (total > 0) {
+        const i = { id: uid(), student_id: s.id, title: '', course: s.course, total,
+          due_date: today(), cycle_start: today(), cycle_end: iso(end), note: '', created_at: nowISO() };
+        DB().invoices.push(i);
+        invId = i.id;
+      }
+      notify(s.id, 'renewed', 'Course renewed', today() + ' – ' + iso(end));
+      log(a.username, 'student.renew', s.name);
+      commit();
+      return { ok: true, invoice: invId, end_date: iso(end), total_classes: s.total_classes };
+    },
+
+    set_guide({ p_token, p_value }) {
+      const s = studentOf(p_token);
+      if (s) { s.guide = Math.max(0, Number(p_value) || 0); commit(); return { ok: true }; }
+      const a = adminOf(p_token);
+      if (a) { a.guide = Math.max(0, Number(p_value) || 0); commit(); return { ok: true }; }
+      return DENY;
     },
 
     admin_delete_payment({ p_token, p_id }) {
@@ -650,7 +762,8 @@
       const a = adminOf(p_token);
       if (!a) return DENY;
       const allowed = ['academy_name', 'timezone', 'contact_phone', 'whatsapp', 'currency',
-        'capacity', 'reply_hours', 'cancel_cutoff_h', 'directory', 'telegram_token', 'telegram_chat'];
+        'capacity', 'reply_hours', 'cancel_cutoff_h', 'directory', 'telegram_token', 'telegram_chat',
+        'price_basic', 'price_advanced', 'price_private'];
       Object.keys(p_data || {}).forEach(k => {
         if (allowed.includes(k)) DB().settings[k] = String(p_data[k]);
       });
@@ -718,7 +831,8 @@
       return { ok: true, data: {
         version: 2, exported_at: nowISO(),
         students: DB().students, slots: DB().slots, roster: DB().link,
-        attendance: DB().attendance, bookings: DB().bookings, payments: DB().payments,
+        attendance: DB().attendance, bookings: DB().bookings,
+        invoices: DB().invoices, payments: DB().payments,
         closures: DB().closures, settings: DB().settings } };
     },
 
@@ -736,7 +850,7 @@
       }
       if (p_mode === 'replace') {
         db.students = []; db.slots = []; db.link = []; db.attendance = [];
-        db.bookings = []; db.payments = []; db.closures = [];
+        db.bookings = []; db.invoices = []; db.payments = []; db.closures = [];
       }
       const upsert = (arr, key, rows) => (rows || []).forEach(r => {
         const i = arr.findIndex(x => x.id === r.id);
@@ -749,6 +863,7 @@
           DB().link.push({ slot_id: r.slot_id, student_id: r.student_id });
       });
       upsert(DB().attendance, 'id', p_data.attendance);
+      upsert(DB().invoices, 'id', p_data.invoices);
       upsert(DB().payments, 'id', p_data.payments);
       upsert(DB().closures, 'id', p_data.closures);
       log(a.username, 'data.import', p_mode);

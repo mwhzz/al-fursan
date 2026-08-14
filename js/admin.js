@@ -6,6 +6,7 @@
   let datePick = null;
   let dayPick = null;
   let query = '';
+  let dayQuery = '';
   let filter = 'active';
   let picked = {};                 // selected booking ids
   let lastTouch = 0;
@@ -142,6 +143,8 @@
           'aria-label="' + U.esc(t('present')) + '" aria-pressed="' + (st === 'present') + '">' + U.icon('check') + '</button>' +
         '<button class="btn icon sm ' + (st === 'absent' ? 'danger' : 'ghost') + '" data-mark="absent" ' +
           'aria-label="' + U.esc(t('absent')) + '" aria-pressed="' + (st === 'absent') + '">' + U.icon('x') + '</button>' +
+        '<button class="btn icon sm ' + (st === 'makeup' ? 'primary' : 'ghost') + '" data-mark="makeup" ' +
+          'aria-label="' + U.esc(t('makeup')) + '" aria-pressed="' + (st === 'makeup') + '">' + U.icon('right') + '</button>' +
       '</div></div>';
   }
 
@@ -166,6 +169,8 @@
         '<input type="date" class="input" id="datePick" value="' + U.esc(datePick) + '" style="min-height:36px;padding:6px 10px;width:auto">' +
         '<button class="btn sm ghost" id="printBtn" aria-label="' + U.esc(t('printSheet')) + '">' + U.icon('print') + '</button>' +
       '</div>' +
+      '<input class="input" id="dayQ" placeholder="' + U.esc(t('search')) + '" value="' + U.esc(dayQuery) +
+        '" autocomplete="off" style="margin-top:10px">' +
       '<div class="grid-3" style="margin-top:14px">' +
         '<div class="stat"><b>' + n(st.students || 0) + '</b><span>' + U.esc(t('students')) + '</span></div>' +
         '<div class="stat"><b>' + n(st.week || 0) + '</b><span>' + U.esc(t('present')) + ' · 7d</span></div>' +
@@ -182,33 +187,58 @@
 
     const body = slots.map(s => {
       const closure = closureOf(datePick, s.id);
-      const extras = (D.bookings || []).filter(b => b.date === datePick && b.slot_id === s.id && b.status === 'approved')
-        .map(b => ({ id: b.student_id, name: b.student, booked: true }));
-      const people = (s.students || []).concat(extras);
+      // approved bookings, plus anyone already marked for this class who is not
+      // on the roster — walk-ins and make-ups have to stay visible
+      const seen = new Set((s.students || []).map(x => x.id));
+      const extras = [];
+      (D.bookings || []).filter(b => b.date === datePick && b.slot_id === s.id && b.status === 'approved')
+        .forEach(b => {
+          if (seen.has(b.student_id)) return;
+          seen.add(b.student_id);
+          extras.push({ id: b.student_id, name: b.student, booked: true });
+        });
+      (D.attendance || []).filter(x => x.date === datePick && (x.time || '') === s.time)
+        .forEach(x => {
+          if (seen.has(x.student_id)) return;
+          const stu = byId(x.student_id);
+          if (!stu) return;
+          seen.add(x.student_id);
+          extras.push({ id: stu.id, name: stu.name, walkin: true });
+        });
+
+      const dq = dayQuery.trim().toLowerCase();
+      const roster = (s.students || []).concat(extras);          // everyone in the class
+      const people = roster.filter(x => !dq || x.name.toLowerCase().includes(dq));  // what the search shows
       const cap = s.capacity || 3;
       let seats = '';
-      for (let i = 0; i < cap; i++) seats += '<span class="seat' + (i < people.length ? ' on' : '') + '"></span>';
+      for (let i = 0; i < cap; i++) seats += '<span class="seat' + (i < roster.length ? ' on' : '') + '"></span>';
       const meta = [s.coach, s.horse].filter(Boolean).join(' · ');
 
-      // the card's stripe summarises the slot: all marked, part marked, nothing yet
-      const marked = people.filter(x => attOf(x.id, datePick, s.time)).length;
-      const state = closure ? 'closed' : !people.length ? 'none'
-        : marked === people.length ? 'present' : marked ? 'partial' : 'none';
+      // the card's stripe summarises the whole slot, not just the search result
+      const marked = roster.filter(x => attOf(x.id, datePick, s.time)).length;
+      const state = closure ? 'closed' : !roster.length ? 'none'
+        : marked === roster.length ? 'present' : marked ? 'partial' : 'none';
 
       return '<section class="panel view" data-state="' + state + '" data-slotcard="' + U.esc(s.id) + '">' +
         '<div class="spread"><div><div class="slot-time">' + U.esc(U.time12(s.time)) + '</div>' +
         (meta ? '<div class="tiny dim">' + U.esc(meta) + '</div>' : '') + '</div>' +
-        '<div class="row" style="gap:8px"><span class="tiny dim num">' + n(people.length) + '/' + n(cap) + '</span>' +
+        '<div class="row" style="gap:8px"><span class="tiny dim num">' + n(roster.length) + '/' + n(cap) + '</span>' +
         '<span class="seats" aria-hidden="true">' + seats + '</span></div></div>' +
         (closure ? '<div class="banner bad" style="margin-top:10px">' + U.icon('alert') +
           U.esc(closure.reason || t('classClosed')) +
           '<button class="btn sm ghost" data-reopen="' + U.esc(closure.id) + '">' + U.esc(t('reopenDay')) + '</button></div>' : '') +
-        (people.length && !closure
-          ? '<div class="list" style="margin-top:12px">' + people.map(x => riderRow(x, s, datePick)).join('') + '</div>' +
-            '<div class="row" style="margin-top:10px;gap:8px">' +
-            '<button class="btn sm ghost grow" data-allpresent="' + U.esc(s.id) + '">' + U.esc(t('markAllPresent')) + '</button>' +
-            '<button class="btn sm ghost" data-close-slot="' + U.esc(s.id) + '">' + U.esc(t('closeDay')) + '</button></div>'
-          : closure ? '' : '<p class="small dim" style="margin-top:10px">' + U.esc(t('nothingHere')) + '</p>') +
+        (closure ? ''
+          : (people.length
+              ? '<div class="list" style="margin-top:12px">' +
+                  people.map(x => riderRow(x, s, datePick)).join('') + '</div>'
+              : '<p class="small dim" style="margin-top:10px">' + U.esc(t('nothingHere')) + '</p>') +
+            '<div class="row wrap" style="margin-top:10px;gap:8px">' +
+              (people.length
+                ? '<button class="btn sm ghost grow" data-allpresent="' + U.esc(s.id) + '">' +
+                  U.esc(t('markAllPresent')) + '</button>' : '') +
+              '<button class="btn sm ghost" data-walkin="' + U.esc(s.id) + '">+ ' + U.esc(t('addRiderToday')) + '</button>' +
+              '<button class="btn sm ghost" data-close-slot="' + U.esc(s.id) + '">' + U.esc(t('closeDay')) + '</button>' +
+            '</div>') +
         '</section>';
     }).join('');
 
@@ -273,13 +303,13 @@
     // the course tint must step aside once a status is set, and come back when cleared
     if (status === 'none') { if (av.dataset.courseWas) av.dataset.course = av.dataset.courseWas; }
     else if (av.dataset.course) { av.dataset.courseWas = av.dataset.course; av.removeAttribute('data-course'); }
-    const [pBtn, aBtn] = rowEl.querySelectorAll('[data-mark]');
-    pBtn.classList.toggle('ok', status === 'present');
-    pBtn.classList.toggle('ghost', status !== 'present');
-    pBtn.setAttribute('aria-pressed', String(status === 'present'));
-    aBtn.classList.toggle('danger', status === 'absent');
-    aBtn.classList.toggle('ghost', status !== 'absent');
-    aBtn.setAttribute('aria-pressed', String(status === 'absent'));
+    rowEl.querySelectorAll('[data-mark]').forEach(btn => {
+      const on = btn.dataset.mark === status;
+      const tone = btn.dataset.mark === 'present' ? 'ok' : btn.dataset.mark === 'absent' ? 'danger' : 'primary';
+      btn.classList.toggle(tone, on);
+      btn.classList.toggle('ghost', !on);
+      btn.setAttribute('aria-pressed', String(on));
+    });
   }
 
   /* ============================== REQUESTS =============================== */
@@ -442,24 +472,44 @@
         (s.note ? '<p class="small muted">' + U.esc(s.note) + '</p>' : '') +
         '<div class="row wrap" style="gap:8px">' +
           '<button class="btn sm ghost" id="editBtn">' + U.esc(t('edit')) + '</button>' +
-          '<button class="btn sm ghost" id="payBtn">' + U.esc(t('addPayment')) + '</button>' +
+          '<button class="btn sm ghost" id="invBtn">' + U.esc(t('newInvoice')) + '</button>' +
+          '<button class="btn sm ghost" id="renewBtn">' + U.esc(t('renew')) + '</button>' +
           (wa ? '<a class="btn sm ghost" target="_blank" rel="noopener" href="https://wa.me/' + wa +
             '?text=' + msg + '">' + U.esc(t('sharePin')) + '</a>' : '') +
           '<button class="btn sm ghost" id="archBtn">' + U.esc(s.active === false ? t('unarchive') : t('archive')) + '</button>' +
         '</div>' +
 
-        (det.payments.length ? '<div><div class="upper" style="margin:6px 0">' + U.esc(t('payments')) + '</div>' +
-          '<div class="list">' + det.payments.map(p =>
-            '<div class="item" data-state="' + (p.paid_on ? 'paid' : 'due') + '">' +
-            '<span class="avatar sm ' + (p.paid_on ? 'ok' : 'muted') + '">' + U.icon('cash') + '</span>' +
-            '<div class="grow"><div style="font-weight:700">' + U.esc(U.money(p.amount, cur())) + '</div>' +
-            '<div class="tiny dim">' + U.esc(p.paid_on ? t('paidOn', { d: U.dateLabel(p.paid_on) })
-              : p.due_date ? t('dueOn', { d: U.dateLabel(p.due_date) }) : '') + '</div></div>' +
-            (p.paid_on ? U.badge(t('paid'), 'ok', true)
-              : '<button class="btn sm primary" data-paid="' + U.esc(p.id) + '" data-amt="' + U.esc(p.amount) +
-                '">' + U.esc(t('markPaid')) + '</button>') +
-            '<button class="btn icon sm ghost" data-delpay="' + U.esc(p.id) + '" aria-label="' + U.esc(t('delete')) + '">' +
-            U.icon('x') + '</button></div>').join('') + '</div></div>' : '') +
+        ((det.invoices || []).length ? '<div><div class="upper" style="margin:6px 0">' + U.esc(t('fees')) + '</div>' +
+          '<div class="stack sm">' + det.invoices.map(inv => {
+            const total = Number(inv.total) || 0, paid = Number(inv.paid) || 0;
+            const left = Math.max(0, total - paid);
+            const pct = total ? Math.min(1, paid / total) : 0;
+            return '<div class="panel flat" data-state="' + (left === 0 ? 'paid' : 'due') + '">' +
+              '<div class="spread"><div><div style="font-weight:700">' +
+                U.esc(inv.title || t('invoice')) + ' · ' + U.esc(U.money(total, cur())) + '</div>' +
+              '<div class="tiny dim">' + U.esc(inv.due_date ? t('dueOn', { d: U.dateLabel(inv.due_date) }) : '') +
+              '</div></div>' +
+              U.badge(left === 0 ? t('fullyPaid') : t('remaining2') + ' ' + U.money(left, cur()),
+                left === 0 ? 'ok' : 'wait', true) + '</div>' +
+              '<div class="progress ' + (left === 0 ? 'ok' : 'warn') + '" style="margin:9px 0">' +
+                '<i style="width:' + (pct * 100).toFixed(0) + '%"></i></div>' +
+              (inv.entries || []).map(e =>
+                '<div class="row tiny" style="justify-content:space-between;padding:3px 0">' +
+                '<span>' + U.esc(U.dateLabel(e.paid_on)) + (e.method ? ' · ' + U.esc(e.method) : '') + '</span>' +
+                '<span class="row" style="gap:6px"><b>' + U.esc(U.money(e.amount, cur())) + '</b>' +
+                '<button class="btn icon sm ghost" data-delpay="' + U.esc(e.id) + '" aria-label="' +
+                U.esc(t('delete')) + '">' + U.icon('x') + '</button></span></div>').join('') +
+              '<div class="row" style="gap:8px;margin-top:8px">' +
+                (left > 0
+                  ? '<button class="btn sm primary grow" data-pay="' + U.esc(inv.id) + '" data-left="' + left +
+                    '">' + U.esc(t('addInstalment')) + '</button>' +
+                    '<button class="btn sm ghost" data-payfull="' + U.esc(inv.id) + '" data-left="' + left +
+                    '">' + U.esc(t('payFull')) + '</button>'
+                  : '') +
+                '<button class="btn icon sm ghost" data-delinv="' + U.esc(inv.id) + '" aria-label="' +
+                U.esc(t('delete')) + '">' + U.icon('x') + '</button>' +
+              '</div></div>';
+          }).join('') + '</div></div>' : '') +
 
         '<div><div class="upper" style="margin:6px 0">' + U.esc(t('history')) + '</div>' +
         (det.attendance.length ? '<div class="list">' + det.attendance.slice(0, 25).map(r =>
@@ -482,17 +532,25 @@
         // swap the dialog contents in place — closing first would let the browser's
         // popstate land on the newly opened form and shut it again
         box.querySelector('#editBtn').addEventListener('click', () => studentForm(s));
-        box.querySelector('#payBtn').addEventListener('click', () => paymentForm(s));
+        box.querySelector('#invBtn').addEventListener('click', () => invoiceForm(s));
+        box.querySelector('#renewBtn').addEventListener('click', () => renewDialog(s));
+        box.querySelectorAll('[data-pay]').forEach(b => b.addEventListener('click', () =>
+          instalmentForm(s, b.dataset.pay, +b.dataset.left)));
+        box.querySelectorAll('[data-payfull]').forEach(b => b.addEventListener('click', async () => {
+          const res = await API.savePayment({ invoice_id: b.dataset.payfull, amount: +b.dataset.left });
+          U.closeDialog();
+          if (!res.ok) return U.toast(t('netErr'), 'err');
+          U.toast(t('fullyPaid'), 'ok'); reload({});
+        }));
+        box.querySelectorAll('[data-delinv]').forEach(b => b.addEventListener('click', async () => {
+          await API.deleteInvoice(b.dataset.delinv);
+          U.closeDialog(); U.toast(t('deleted')); reload({});
+        }));
         box.querySelector('#archBtn').addEventListener('click', async () => {
           await API.saveStudent(Object.assign({}, s, { active: s.active === false }));
           U.closeDialog(); U.toast(t('saved'), 'ok'); reload({});
         });
         box.querySelector('#delBtn').addEventListener('click', () => deleteRider(s, det));
-        box.querySelectorAll('[data-paid]').forEach(b => b.addEventListener('click', async () => {
-          await API.savePayment({ id: b.dataset.paid, student_id: s.id, amount: b.dataset.amt,
-            paid_on: U.todayISO() });
-          U.closeDialog(); U.toast(t('saved'), 'ok'); reload({});
-        }));
         box.querySelectorAll('[data-delpay]').forEach(b => b.addEventListener('click', async () => {
           await API.deletePayment(b.dataset.delpay);
           U.closeDialog(); U.toast(t('deleted')); reload({});
@@ -582,28 +640,133 @@
     });
   }
 
-  function paymentForm(s) {
+  /** what a rider owes for a cycle — pre-filled from the course price */
+  function invoiceForm(s) {
+    const price = Number(S()['price_' + (s.course || 'basic')] || 0);
     U.dialog({
-      title: t('addPayment') + ' — ' + s.name,
+      title: t('newInvoice') + ' — ' + s.name,
       body: '<div class="grid-2">' +
-          U.field(t('amount'), '<input class="input" id="p_amt" type="number" min="0" step="1" value="0">') +
-          U.field(t('dueOn', { d: '' }).trim() || t('due'), '<input class="input" id="p_due" type="date" value="' + U.todayISO() + '">') +
+          U.field(t('totalFee'), '<input class="input" id="i_total" type="number" min="1" step="1" value="' + price + '">') +
+          U.field(t('due'), '<input class="input" id="i_due" type="date" value="' + U.todayISO() + '">') +
         '</div>' +
-        '<label class="check"><input type="checkbox" id="p_paid"><span>' + U.esc(t('markPaid')) + '</span></label>' +
-        U.field(t('note'), '<input class="input" id="p_note">'),
+        U.field(t('note'), '<input class="input" id="i_title" value="' + U.esc(t(s.course || 'basic')) + '">'),
       actions: '<button class="btn ghost grow" data-close>' + U.esc(t('cancel')) + '</button>' +
         '<button class="btn primary grow" id="save">' + U.esc(t('save')) + '</button>',
       onMount(box) {
         box.querySelector('#save').addEventListener('click', async () => {
-          const res = await API.savePayment({
-            student_id: s.id, amount: +box.querySelector('#p_amt').value || 0,
-            due_date: box.querySelector('#p_due').value || null,
-            paid_on: box.querySelector('#p_paid').checked ? U.todayISO() : null,
-            note: box.querySelector('#p_note').value.trim()
+          const res = await API.saveInvoice({
+            student_id: s.id, course: s.course,
+            title: box.querySelector('#i_title').value.trim(),
+            total: +box.querySelector('#i_total').value || 0,
+            due_date: box.querySelector('#i_due').value || null
           });
-          if (!res.ok) return U.toast(t('netErr'), 'err');
+          if (!res.ok) return U.toast(res.error === 'amount' ? t('fillAll') : t('netErr'), 'err');
           U.closeDialog(); U.toast(t('saved'), 'ok'); reload({});
         });
+      }
+    });
+  }
+
+  /** one instalment against a fee — never more than is still owed */
+  function instalmentForm(s, invoiceId, left) {
+    U.dialog({
+      title: t('addInstalment') + ' — ' + s.name,
+      body: '<p class="muted">' + U.esc(t('remaining2')) + ': <b>' + U.esc(U.money(left, cur())) + '</b></p>' +
+        '<div class="grid-2">' +
+          U.field(t('amount'), '<input class="input" id="e_amt" type="number" min="1" max="' + left +
+            '" step="1" value="' + left + '">') +
+          U.field(t('paidOn', { d: '' }).trim() || t('paid'),
+            '<input class="input" id="e_on" type="date" value="' + U.todayISO() + '">') +
+        '</div>' +
+        U.field(t('method'), '<input class="input" id="e_method">') +
+        '<p class="form-error hide" id="e_err"></p>',
+      actions: '<button class="btn ghost grow" data-close>' + U.esc(t('cancel')) + '</button>' +
+        '<button class="btn primary grow" id="save">' + U.esc(t('save')) + '</button>',
+      onMount(box) {
+        box.querySelector('#save').addEventListener('click', async () => {
+          const err = box.querySelector('#e_err');
+          const amount = +box.querySelector('#e_amt').value || 0;
+          if (amount <= 0) { err.textContent = t('fillAll'); err.classList.remove('hide'); return; }
+          const res = await API.savePayment({
+            invoice_id: invoiceId, amount,
+            paid_on: box.querySelector('#e_on').value || U.todayISO(),
+            method: box.querySelector('#e_method').value.trim()
+          });
+          if (!res.ok) {
+            err.textContent = res.error === 'over'
+              ? t('overPay', { a: U.money(res.remaining, cur()) }) : t('netErr');
+            err.classList.remove('hide');
+            return;
+          }
+          U.closeDialog();
+          U.toast(Number(res.remaining) > 0
+            ? t('remaining2') + ' ' + U.money(res.remaining, cur()) : t('fullyPaid'), 'ok');
+          reload({});
+        });
+      }
+    });
+  }
+
+  function renewDialog(s) {
+    const price = Number(S()['price_' + (s.course || 'basic')] || 0);
+    const classes = s.course === 'advanced' ? 16 : s.course === 'private' ? 12 : 8;
+    const months = s.course === 'advanced' ? 2 : 1;
+    const end = U.parseISO(U.todayISO());
+    end.setMonth(end.getMonth() + months);
+    const endISO = end.toISOString().slice(0, 10);
+
+    U.dialog({
+      title: t('renewAsk', { name: s.name }),
+      body: '<p class="muted">' + U.esc(t('renewSummary', {
+          c: n(classes), d: U.dateLabel(endISO), a: U.money(price, cur())
+        })) + '</p>' +
+        U.field(t('totalFee'), '<input class="input" id="r_amt" type="number" min="0" step="1" value="' + price + '">') +
+        '<p class="tiny dim">' + U.esc(t('renewHint')) + '</p>',
+      actions: '<button class="btn ghost grow" data-close>' + U.esc(t('cancel')) + '</button>' +
+        '<button class="btn primary grow" id="go">' + U.esc(t('renew')) + '</button>',
+      onMount(box) {
+        box.querySelector('#go').addEventListener('click', async () => {
+          const res = await API.renew(s.id, +box.querySelector('#r_amt').value || 0);
+          U.closeDialog();
+          if (!res.ok) return U.toast(t('netErr'), 'err');
+          U.toast(t('renewed'), 'ok');
+          reload({});
+        });
+      }
+    });
+  }
+
+  /** add someone to today's class who is not on the roster (walk-in or make-up) */
+  function walkIn(slotId) {
+    const slot = slotById(slotId);
+    const already = new Set((slot.students || []).map(x => x.id));
+    (D.bookings || []).filter(b => b.slot_id === slotId && b.date === datePick && b.status === 'approved')
+      .forEach(b => already.add(b.student_id));
+    const list = (D.students || []).filter(s => s.active !== false && !already.has(s.id));
+
+    U.dialog({
+      title: t('addRiderToday') + ' · ' + U.time12(slot.time),
+      body: '<input class="input" id="wq" placeholder="' + U.esc(t('search')) + '">' +
+        '<div class="list name-list">' + list.map(s =>
+          '<button class="item" data-walkpick="' + U.esc(s.id) + '" data-name="' + U.esc(s.name.toLowerCase()) + '">' +
+          U.avatar(s.name, '', s.course) +
+          '<span class="grow"><b>' + U.esc(s.name) + '</b><br><span class="tiny dim">' +
+          n(s.done || 0) + '/' + n(s.total_classes || 0) + '</span></span>' +
+          U.courseBadge(s.course) + '</button>').join('') + '</div>',
+      onMount(box) {
+        box.querySelector('#wq').addEventListener('input', e => {
+          const q = e.target.value.toLowerCase();
+          box.querySelectorAll('[data-walkpick]').forEach(el =>
+            el.classList.toggle('hide', !el.dataset.name.includes(q)));
+        });
+        box.querySelectorAll('[data-walkpick]').forEach(el => el.addEventListener('click', async () => {
+          // marking them present for the day is what actually puts them in the class
+          const res = await API.mark(el.dataset.walkpick, datePick, slot.time, 'present');
+          U.closeDialog();
+          if (!res.ok) return U.toast(t('netErr'), 'err');
+          U.toast(t('marked'), 'ok');
+          reload({});
+        }));
       }
     });
   }
@@ -742,6 +905,12 @@
           U.field(t('replyHours'), '<input class="input" id="st_reply" type="number" min="1" value="' + U.esc(s.reply_hours || 24) + '">') +
         '</div>' +
         U.field(t('cancelCutoff'), '<input class="input" id="st_cut" type="number" min="0" value="' + U.esc(s.cancel_cutoff_h || 3) + '">') +
+        '<div class="upper" style="margin-top:4px">' + U.esc(t('prices')) + '</div>' +
+        '<div class="grid-3">' +
+          U.field(t('priceBasic'), '<input class="input" id="st_pb" type="number" min="0" value="' + U.esc(s.price_basic || 0) + '">') +
+          U.field(t('priceAdvanced'), '<input class="input" id="st_pa" type="number" min="0" value="' + U.esc(s.price_advanced || 0) + '">') +
+          U.field(t('pricePrivate'), '<input class="input" id="st_pp" type="number" min="0" value="' + U.esc(s.price_private || 0) + '">') +
+        '</div>' +
         '<label class="check"><input type="checkbox" id="st_dir"' + (s.directory !== 'off' ? ' checked' : '') + '>' +
         '<span>' + U.esc(t('directory')) + '</span></label>' +
         '<button class="btn primary" id="saveSettings">' + U.esc(t('save')) + '</button>' +
@@ -788,6 +957,7 @@
         '<div><div class="upper" style="margin-bottom:8px">' + U.esc(t('language')) + '</div>' +
         '<div class="segmented"><button data-uilang="en" aria-pressed="' + (I18N.lang === 'en') + '">English</button>' +
         '<button data-uilang="bn" aria-pressed="' + (I18N.lang === 'bn') + '">বাংলা</button></div></div>' +
+        '<button class="btn ghost block" id="guideBtn">' + U.esc(t('guideAgain')) + '</button>' +
         '<button class="btn ghost block" id="installBtn">' + U.esc(t('installApp')) + '</button>' +
         '<button class="btn ghost block" id="logout">' + U.esc(t('logout')) + '</button>' +
       '</div>' +
@@ -971,7 +1141,10 @@
         whatsapp: $('#st_wa').value.trim(), timezone: $('#st_tz').value.trim() || 'Asia/Dhaka',
         currency: $('#st_cur').value.trim() || 'BDT', capacity: String(+$('#st_cap').value || 3),
         reply_hours: String(+$('#st_reply').value || 24), cancel_cutoff_h: String(+$('#st_cut').value || 0),
-        directory: $('#st_dir').checked ? 'on' : 'off'
+        directory: $('#st_dir').checked ? 'on' : 'off',
+        price_basic: String(+$('#st_pb').value || 0),
+        price_advanced: String(+$('#st_pa').value || 0),
+        price_private: String(+$('#st_pp').value || 0)
       });
       if (!res.ok) return U.toast(t('netErr'), 'err');
       U.toast(t('saved'), 'ok'); reload({});
@@ -1018,6 +1191,17 @@
     wire('#importBtn', 'click', () => $('#importFile').click());
     wire('#importFile', 'change', el => { if (el.files && el.files[0]) importFlow(el.files[0]); });
     wire('#installBtn', 'click', () => window.AF_INSTALL && window.AF_INSTALL());
+    wire('#guideBtn', 'click', () => GUIDE.open('admin'));
+    wire('[data-walkin]', 'click', el => walkIn(el.dataset.walkin));
+    const dq = $('#dayQ');
+    if (dq) dq.addEventListener('input', e => {
+      touch();
+      dayQuery = e.target.value;
+      const pos = e.target.selectionStart;
+      render();
+      const el = document.getElementById('dayQ');
+      if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+    });
     wire('#logout', 'click', async () => {
       await API.logout(); API.session.clear(); location.hash = ''; location.reload();
     });
@@ -1031,10 +1215,17 @@
   }
 
   function closeDayDialog(slotId) {
+    // warn if the day already has attendance — cancelling then loses real work
+    const slotTime = slotId ? (slotById(slotId) || {}).time : null;
+    const marks = (D.attendance || []).filter(x => x.date === datePick &&
+      (!slotId || (x.time || '') === (slotTime || ''))).length;
+
     U.dialog({
       title: t('closeDay'),
       body: '<p class="muted">' + U.esc(U.dateFull(datePick)) +
-        (slotId ? ' · ' + U.esc(U.time12((slotById(slotId) || {}).time)) : ' · ' + U.esc(t('wholeDay'))) + '</p>' +
+        (slotId ? ' · ' + U.esc(U.time12(slotTime)) : ' · ' + U.esc(t('wholeDay'))) + '</p>' +
+        (marks ? '<div class="banner warn">' + U.icon('alert') +
+          U.esc(t('closeDayMarked', { n: n(marks) })) + '</div>' : '') +
         U.field(t('reason'), '<input class="input" id="why" maxlength="140">') +
         '<p class="tiny dim">' + U.esc(t('closeDayHint')) + '</p>',
       actions: '<button class="btn ghost grow" data-close>' + U.esc(t('cancel')) + '</button>' +
@@ -1061,6 +1252,7 @@
       tab = TABS.indexOf(want) >= 0 ? want : 'today';
       knownPending = new Set(pendingList().map(b => b.id));
       render();
+      GUIDE.maybeShow('admin', (D.admin || {}).guide);
       startPolling();
       API.onConnection(on => { if (on) reload({ poll: true }); else render(); });
     },

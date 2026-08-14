@@ -81,7 +81,12 @@
   const initials = name => String(name || '?').trim().split(/\s+/).slice(0, 2)
     .map(w => w[0]).join('').toUpperCase();
 
-  const money = (v, cur) => (cur || 'BDT') + ' ' + n(Number(v || 0).toLocaleString('en-US'));
+  const SYMBOL = { BDT: '৳', USD: '$', EUR: '€', GBP: '£', INR: '₹', AED: 'د.إ', PKR: '₨' };
+  const money = (v, cur) => {
+    const c = cur || 'BDT';
+    const sym = SYMBOL[c] || (c + ' ');
+    return sym + n(Number(v || 0).toLocaleString('en-US'));
+  };
 
   /* ---------------------------------------------------------------- theme --*/
   const theme = {
@@ -143,11 +148,13 @@
 
   /* --------------------------------------------------------------- dialog --*/
   let dlgOpen = false, pushedState = false, lastFocus = null, onCloseCb = null, backPending = false;
+  let dlgLocked = false;   // a locked dialog cannot be dismissed: no close button,
+                           // no Escape, no backdrop, and Back keeps it open
 
   // the backdrop lives outside .modal and is never re-rendered, so bind it once
   function bindBackdrop() {
     const bd = document.querySelector('#modal .modal-backdrop');
-    if (bd) bd.addEventListener('click', () => closeDialog());
+    if (bd) bd.addEventListener('click', () => { if (!dlgLocked) closeDialog(); });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindBackdrop);
   else bindBackdrop();
@@ -161,7 +168,7 @@
     if (!dlgOpen) return;
     const box = document.querySelector('#modal .modal');
     if (!box) return;
-    if (e.key === 'Escape') { e.preventDefault(); closeDialog(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); if (!dlgLocked) closeDialog(); return; }
     if (e.key !== 'Tab') return;
     const f = focusables(box);
     if (!f.length) return;
@@ -179,9 +186,12 @@
     const box = wrap.querySelector('.modal');
     const id = 'dlg-title';
 
+    dlgLocked = !!opts.locked;
     box.innerHTML =
       '<div class="modal-head"><h2 id="' + id + '">' + esc(opts.title || '') + '</h2>' +
-      '<button class="btn icon ghost" data-close aria-label="' + esc(t('close')) + '">' + ICON.x + '</button></div>' +
+      (dlgLocked ? '' :
+        '<button class="btn icon ghost" data-close aria-label="' + esc(t('close')) + '">' + ICON.x + '</button>') +
+      '</div>' +
       '<div class="modal-body">' + (opts.body || '') + '</div>' +
       (opts.actions ? '<div class="modal-foot">' + opts.actions + '</div>' : '');
 
@@ -215,6 +225,7 @@
   function closeDialog(fromPop) {
     if (!dlgOpen) return;
     dlgOpen = false;
+    dlgLocked = false;
     const wrap = document.getElementById('modal');
     wrap.hidden = true;
     wrap.querySelector('.modal').innerHTML = '';
@@ -232,6 +243,8 @@
     // our own history.back() from closeDialog: already handled, and it must not
     // close whatever dialog may have opened in the meantime
     if (backPending) { backPending = false; return; }
+    // a locked dialog holds the app: put the entry back and stay put
+    if (dlgOpen && dlgLocked) { history.pushState({ afDialog: 1 }, '', location.href); return; }
     if (dlgOpen) { closeDialog(true); return; }
     pushedState = false;
     router.emit();

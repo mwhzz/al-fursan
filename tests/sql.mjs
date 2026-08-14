@@ -97,7 +97,7 @@ const sess = await call('student_session', { p_token: Z });
 ok('session carries every section the app reads',
   sess.ok && sess.student && sess.schedule.length === 20 && sess.seats &&
   Array.isArray(sess.attendance) && Array.isArray(sess.bookings) &&
-  Array.isArray(sess.payments) && Array.isArray(sess.notifications) && Array.isArray(sess.closures),
+  Array.isArray(sess.invoices) && Array.isArray(sess.notifications) && Array.isArray(sess.closures),
   Object.keys(sess));
 ok('rider payload hides PINs', sess.student.pin === undefined && JSON.stringify(sess.schedule).indexOf('"pin"') === -1);
 
@@ -266,22 +266,53 @@ ok('a slot can be paused and keeps coach and horse',
 ok('a paused slot disappears for riders',
   !(await call('student_session', { p_token: Z })).schedule.some(s => s.id === slot.id));
 
-const pay = await call('admin_save_payment', {
-  p_token: A, p_data: { student_id: zawad.id, amount: 4000, due_date: todayISO }
+/* Fees are paid in parts: raise one invoice, then pay it off gradually. */
+const owed = s => Number(s.students.find(x => x.id === zawad.id).unpaid);
+const inv = await call('admin_save_invoice', {
+  p_token: A, p_data: { student_id: zawad.id, title: 'Basic', course: 'basic', total: 5500, due_date: todayISO }
 });
+ok('an invoice can be raised', inv.ok, inv);
 ov = await call('admin_session', { p_token: A });
-ok('an unpaid fee shows on the rider and in the alerts',
-  Number(ov.students.find(s => s.id === zawad.id).unpaid) === 4000 &&
-  ov.alerts.unpaid.some(x => x.id === zawad.id), ov.alerts.unpaid);
-await call('admin_save_payment', {
-  p_token: A, p_data: { id: pay.id, student_id: zawad.id, amount: 4000, paid_on: todayISO }
-});
+ok('the full amount shows as owed and raises an alert',
+  owed(ov) === 5500 && ov.alerts.unpaid.some(x => x.id === zawad.id), ov.alerts.unpaid);
+
+const p1 = await call('admin_save_payment', { p_token: A, p_data: { invoice_id: inv.id, amount: 2000 } });
+ok('a part payment is accepted and reports what is left',
+  p1.ok && Number(p1.remaining) === 3500, p1);
 ov = await call('admin_session', { p_token: A });
-ok('marking paid clears the balance and counts as income',
-  Number(ov.students.find(s => s.id === zawad.id).unpaid) === 0 && Number(ov.stats.month_income) === 4000,
-  ov.stats);
-ok('the rider is told about the payment',
-  (await call('student_session', { p_token: Z })).notifications.some(x => x.kind === 'payment'));
+ok('only the remainder is still owed', owed(ov) === 3500, owed(ov));
+
+const over = await call('admin_save_payment', { p_token: A, p_data: { invoice_id: inv.id, amount: 99999 } });
+ok('paying more than is owed is refused', over.error === 'over' && Number(over.remaining) === 3500, over);
+
+const p2 = await call('admin_save_payment', { p_token: A, p_data: { invoice_id: inv.id, amount: 3500 } });
+ok('the last instalment clears the invoice', p2.ok && Number(p2.remaining) === 0, p2);
+ov = await call('admin_session', { p_token: A });
+ok('nothing is owed and both instalments count as income',
+  owed(ov) === 0 && Number(ov.stats.month_income) === 5500, ov.stats);
+
+const paidSess = await call('student_session', { p_token: Z });
+ok('the rider sees the invoice with every instalment',
+  paidSess.invoices.length === 1 && Number(paidSess.invoices[0].paid) === 5500 &&
+  paidSess.invoices[0].entries.length === 2, paidSess.invoices);
+ok('the rider is told about each payment',
+  paidSess.notifications.filter(x => x.kind === 'payment').length === 2);
+
+/* Renewing starts the next cycle and bills it at the course price. */
+const beforeRenew = ov.students.find(s => s.id === zawad.id).total_classes;
+const renew = await call('admin_renew', { p_token: A, p_student: zawad.id, p_amount: null });
+ok('renewing extends the course and raises the next invoice', renew.ok && renew.invoice, renew);
+ov = await call('admin_session', { p_token: A });
+const renewed = ov.students.find(s => s.id === zawad.id);
+ok('the renewal adds a fresh set of classes', renewed.total_classes === beforeRenew + 8,
+  { before: beforeRenew, after: renewed.total_classes });
+ok('the renewal is billed at the configured price', owed(ov) === 5500, owed(ov));
+
+/* The guide: 0 never seen, 1 seen, 2 muted. */
+ok('a new rider has not seen the guide', paidSess.student.guide === 0, paidSess.student.guide);
+ok('the guide state can be stored', (await call('set_guide', { p_token: Z, p_value: 2 })).ok);
+ok('and it is remembered',
+  (await call('student_session', { p_token: Z })).student.guide === 2);
 
 /* ------------------------------------------------------ self-service --*/
 ok('a rider can change their own phone and PIN',

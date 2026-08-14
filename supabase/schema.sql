@@ -84,9 +84,26 @@ create table if not exists closures (
 );
 create unique index if not exists closures_uniq on closures (date, (coalesce(slot_id,'00000000-0000-0000-0000-000000000000'::uuid)));
 
+-- What a rider owes for one course cycle.
+create table if not exists invoices (
+  id          uuid primary key default gen_random_uuid(),
+  student_id  uuid not null references students(id) on delete cascade,
+  title       text default '',
+  course      text default '',
+  total       numeric(10,2) not null default 0,
+  due_date    date,
+  cycle_start date,
+  cycle_end   date,
+  note        text default '',
+  created_at  timestamptz not null default now()
+);
+create index if not exists invoices_student_idx on invoices (student_id);
+
+-- Money actually received. Several rows per invoice: fees are paid in parts.
 create table if not exists payments (
   id          uuid primary key default gen_random_uuid(),
   student_id  uuid not null references students(id) on delete cascade,
+  invoice_id  uuid references invoices(id) on delete cascade,
   amount      numeric(10,2) not null default 0,
   due_date    date,
   paid_on     date,
@@ -97,6 +114,20 @@ create table if not exists payments (
   created_at  timestamptz not null default now()
 );
 create index if not exists payments_student_idx on payments (student_id);
+alter table payments add column if not exists invoice_id uuid references invoices(id) on delete cascade;
+
+-- v2 stored one row per fee, paid or not. Turn each into an invoice, and keep
+-- the paid ones as the first instalment against it.
+do $$
+begin
+  if not exists (select 1 from invoices) and exists (select 1 from payments) then
+    insert into invoices (id, student_id, total, due_date, cycle_start, cycle_end, note, created_at)
+      select id, student_id, amount, due_date, cycle_start, cycle_end, note, created_at from payments;
+    update payments set invoice_id = id;
+    delete from payments where paid_on is null;
+  end if;
+end $$;
+
 
 -- messages shown to a rider inside the app
 create table if not exists notifications (
@@ -120,6 +151,10 @@ create table if not exists admin_users (
   created_at timestamptz not null default now()
 );
 create unique index if not exists admin_users_uniq on admin_users (lower(username));
+
+-- 0 = never seen the guide, 1 = seen at least once, 2 = muted
+alter table students    add column if not exists guide int not null default 0;
+alter table admin_users add column if not exists guide int not null default 0;
 
 create table if not exists sessions (
   token      text primary key,
@@ -163,6 +198,9 @@ insert into app_settings(key, value) values
   ('reply_hours',     '24'),
   ('cancel_cutoff_h', '3'),
   ('directory',       'on'),
+  ('price_basic',     '5500'),
+  ('price_advanced',  '12000'),
+  ('price_private',   '15000'),
   ('telegram_token',  ''),
   ('telegram_chat',   ''),
   ('admin_password',  'alfursan')     -- v1 leftover, kept for migration only
@@ -191,6 +229,7 @@ alter table slot_students  enable row level security;
 alter table attendance     enable row level security;
 alter table bookings       enable row level security;
 alter table closures       enable row level security;
+alter table invoices       enable row level security;
 alter table payments       enable row level security;
 alter table notifications  enable row level security;
 alter table admin_users    enable row level security;
@@ -200,7 +239,7 @@ alter table error_log      enable row level security;
 alter table login_attempts enable row level security;
 
 revoke all on app_settings, students, slots, slot_students, attendance, bookings, closures,
-  payments, notifications, admin_users, sessions, activity_log, error_log, login_attempts
+  invoices, payments, notifications, admin_users, sessions, activity_log, error_log, login_attempts
   from anon, authenticated;
 
 -- ------------------------------------------------------------- helpers ------
@@ -334,9 +373,33 @@ returns jsonb language sql security definer stable set search_path = public as $
     'absent',  (select count(*) from attendance a where a.student_id = s.id and a.status = 'absent'),
     'cycle_done', (select count(*) from attendance a
                     where a.student_id = s.id and a.status = 'present' and a.date >= s.start_date),
-    'unpaid',  (select coalesce(sum(amount),0) from payments p where p.student_id = s.id and p.paid_on is null)
+    -- billed minus received, so part payments show the real remainder
+    'unpaid', greatest(0,
+        (select coalesce(sum(i.total),0) from invoices i where i.student_id = s.id)
+      - (select coalesce(sum(p.amount),0) from payments p where p.student_id = s.id)),
+    'guide', s.guide
   ) || case when p_admin then jsonb_build_object('pin', s.pin) else '{}'::jsonb end
   from students s where s.id = p_id;
+$$;
+
+/** invoices with what has been paid so far and every instalment listed */
+create or replace function public._invoices(p_student uuid)
+returns jsonb language sql security definer stable set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object(
+    'id', i.id, 'title', i.title, 'course', i.course, 'total', i.total,
+    'due_date', i.due_date, 'cycle_start', i.cycle_start, 'cycle_end', i.cycle_end, 'note', i.note,
+    'paid', coalesce((select sum(p.amount) from payments p where p.invoice_id = i.id), 0),
+    'entries', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', p.id, 'amount', p.amount, 'paid_on', p.paid_on, 'method', p.method, 'note', p.note)
+        order by p.paid_on, p.created_at)
+      from payments p where p.invoice_id = i.id), '[]'::jsonb)
+  ) order by coalesce(i.due_date, i.created_at::date) desc), '[]'::jsonb)
+  from invoices i where i.student_id = p_student;
+$$;
+
+create or replace function public._price(p_course text)
+returns numeric language sql security definer stable set search_path = public as $$
+  select coalesce(nullif(_setting('price_' || coalesce(p_course,'basic')), '')::numeric, 0);
 $$;
 
 create or replace function public._public_settings()
@@ -351,6 +414,9 @@ returns jsonb language sql security definer stable set search_path = public as $
     'reply_hours', _setting('reply_hours','24'),
     'cancel_cutoff_h', _setting('cancel_cutoff_h','3'),
     'directory', _setting('directory','on'),
+    'price_basic', _setting('price_basic','5500'),
+    'price_advanced', _setting('price_advanced','12000'),
+    'price_private', _setting('price_private','15000'),
     'today', _today());
 $$;
 
@@ -416,11 +482,7 @@ begin
         'created_at', b.created_at, 'time', s.time, 'day', s.day) order by b.date desc)
         from bookings b join slots s on s.id = b.slot_id
         where b.student_id = st.id and b.date >= _today() - 60), '[]'::jsonb),
-    'payments', coalesce((select jsonb_agg(jsonb_build_object(
-        'id', p.id, 'amount', p.amount, 'due_date', p.due_date, 'paid_on', p.paid_on,
-        'cycle_start', p.cycle_start, 'cycle_end', p.cycle_end, 'note', p.note)
-        order by coalesce(p.due_date, p.created_at::date) desc)
-        from payments p where p.student_id = st.id), '[]'::jsonb),
+    'invoices', _invoices(st.id),
     'notifications', coalesce((select jsonb_agg(jsonb_build_object(
         'id', nt.id, 'kind', nt.kind, 'title', nt.title, 'body', nt.body,
         'read', nt.read, 'created_at', nt.created_at) order by nt.created_at desc)
@@ -632,7 +694,8 @@ begin
   d := _today();
   return jsonb_build_object(
     'ok', true,
-    'admin', jsonb_build_object('id', a.id, 'username', a.username, 'display', a.display, 'role', a.role),
+    'admin', jsonb_build_object('id', a.id, 'username', a.username, 'display', a.display,
+                                'role', a.role, 'guide', a.guide),
     'settings', _public_settings() || jsonb_build_object(
       'telegram_token', _setting('telegram_token'), 'telegram_chat', _setting('telegram_chat')),
     'students', coalesce((select jsonb_agg(_student_json(s.id, true) order by s.name) from students s), '[]'::jsonb),
@@ -647,10 +710,11 @@ begin
         'note', b.note, 'reason', b.reason, 'created_at', b.created_at) order by b.created_at desc)
         from bookings b join students st on st.id = b.student_id join slots s on s.id = b.slot_id
         where b.date >= d - 30), '[]'::jsonb),
-    'payments', coalesce((select jsonb_agg(jsonb_build_object(
-        'id', p.id, 'student_id', p.student_id, 'amount', p.amount, 'due_date', p.due_date,
-        'paid_on', p.paid_on, 'cycle_start', p.cycle_start, 'cycle_end', p.cycle_end, 'note', p.note)
-        order by coalesce(p.due_date, p.created_at::date) desc) from payments p), '[]'::jsonb),
+    'invoices', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', i.id, 'student_id', i.student_id, 'title', i.title, 'total', i.total,
+        'due_date', i.due_date, 'course', i.course,
+        'paid', coalesce((select sum(p.amount) from payments p where p.invoice_id = i.id), 0))
+        order by coalesce(i.due_date, i.created_at::date) desc) from invoices i), '[]'::jsonb),
     'closures', coalesce((select jsonb_agg(jsonb_build_object(
         'id', c.id, 'date', c.date, 'slot_id', c.slot_id, 'reason', c.reason))
         from closures c where c.date >= d - 30), '[]'::jsonb),
@@ -671,9 +735,13 @@ begin
       'exhausted', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name))
         from students s where s.active and s.total_classes <=
           (select count(*) from attendance att where att.student_id = s.id and att.status = 'present')), '[]'::jsonb),
-      'unpaid', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name, 'amount', t.amt))
-        from (select student_id, sum(amount) amt from payments where paid_on is null group by student_id) t
-        join students s on s.id = t.student_id), '[]'::jsonb)),
+      'unpaid', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name, 'amount', owed))
+        from (
+          select s2.id, s2.name,
+                 (select coalesce(sum(i.total),0) from invoices i where i.student_id = s2.id)
+               - (select coalesce(sum(p.amount),0) from payments p where p.student_id = s2.id) owed
+          from students s2 where s2.active
+        ) s where owed > 0), '[]'::jsonb)),
     'stats', jsonb_build_object(
       'students', (select count(*) from students where active),
       'week', (select count(*) from attendance where date >= d - 7 and status = 'present'),
@@ -696,10 +764,7 @@ begin
         'id', b.id, 'date', b.date, 'time', s.time, 'status', b.status, 'reason', b.reason)
         order by b.date desc) from bookings b join slots s on s.id = b.slot_id
         where b.student_id = p_id), '[]'::jsonb),
-    'payments', coalesce((select jsonb_agg(jsonb_build_object(
-        'id', p.id, 'amount', p.amount, 'due_date', p.due_date, 'paid_on', p.paid_on, 'note', p.note)
-        order by coalesce(p.due_date, p.created_at::date) desc)
-        from payments p where p.student_id = p_id), '[]'::jsonb),
+    'invoices', _invoices(p_id),
     'slots', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'day', s.day, 'time', s.time))
         from slot_students ss join slots s on s.id = ss.slot_id where ss.student_id = p_id), '[]'::jsonb));
 end $$;
@@ -953,32 +1018,85 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
-create or replace function public.admin_save_payment(p_token text, p_data jsonb)
+/** create or edit what a rider owes for a cycle */
+create or replace function public.admin_save_invoice(p_token text, p_data jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare a admin_users; v_id uuid; v_student uuid;
+declare a admin_users; v_id uuid; v_student uuid; v_total numeric;
 begin
   a := _admin(p_token);
   if a.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
   v_id := nullif(p_data->>'id','')::uuid;
   v_student := (p_data->>'student_id')::uuid;
+  v_total := coalesce(nullif(p_data->>'total','')::numeric, 0);
+  if v_total <= 0 then return jsonb_build_object('ok', false, 'error', 'amount'); end if;
+
   if v_id is null then
-    insert into payments (student_id, amount, due_date, paid_on, cycle_start, cycle_end, method, note)
-      values (v_student, coalesce((p_data->>'amount')::numeric, 0), nullif(p_data->>'due_date','')::date,
-              nullif(p_data->>'paid_on','')::date, nullif(p_data->>'cycle_start','')::date,
-              nullif(p_data->>'cycle_end','')::date, coalesce(p_data->>'method',''), coalesce(p_data->>'note',''))
+    insert into invoices (student_id, title, course, total, due_date, cycle_start, cycle_end, note)
+      values (v_student, coalesce(p_data->>'title',''), coalesce(p_data->>'course',''), v_total,
+              nullif(p_data->>'due_date','')::date, nullif(p_data->>'cycle_start','')::date,
+              nullif(p_data->>'cycle_end','')::date, coalesce(p_data->>'note',''))
+      returning id into v_id;
+    perform _notify_student(v_student, 'invoice', 'New fee',
+      _setting('currency','BDT') || ' ' || v_total);
+  else
+    update invoices set title = coalesce(p_data->>'title', title), total = v_total,
+      due_date = nullif(p_data->>'due_date','')::date, note = coalesce(p_data->>'note', note)
+    where id = v_id;
+  end if;
+  perform _log(a.username, 'invoice.save', v_total::text);
+  return jsonb_build_object('ok', true, 'id', v_id);
+end $$;
+
+create or replace function public.admin_delete_invoice(p_token text, p_id uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare a admin_users;
+begin
+  a := _admin(p_token);
+  if a.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
+  delete from invoices where id = p_id;
+  perform _log(a.username, 'invoice.delete', '');
+  return jsonb_build_object('ok', true);
+end $$;
+
+/** record one instalment against an invoice — fees are paid in parts */
+create or replace function public.admin_save_payment(p_token text, p_data jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare a admin_users; v_id uuid; v_inv invoices; v_amount numeric; v_paid numeric; v_left numeric;
+begin
+  a := _admin(p_token);
+  if a.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
+  v_id := nullif(p_data->>'id','')::uuid;
+  v_amount := coalesce(nullif(p_data->>'amount','')::numeric, 0);
+  if v_amount <= 0 then return jsonb_build_object('ok', false, 'error', 'amount'); end if;
+
+  select * into v_inv from invoices where id = nullif(p_data->>'invoice_id','')::uuid;
+  if v_inv.id is null then return jsonb_build_object('ok', false, 'error', 'invoice'); end if;
+
+  select coalesce(sum(amount),0) into v_paid from payments
+   where invoice_id = v_inv.id and (v_id is null or id <> v_id);
+  if v_paid + v_amount > v_inv.total then
+    return jsonb_build_object('ok', false, 'error', 'over', 'remaining', v_inv.total - v_paid);
+  end if;
+
+  if v_id is null then
+    insert into payments (student_id, invoice_id, amount, paid_on, method, note)
+      values (v_inv.student_id, v_inv.id, v_amount,
+              coalesce(nullif(p_data->>'paid_on','')::date, _today()),
+              coalesce(p_data->>'method',''), coalesce(p_data->>'note',''))
       returning id into v_id;
   else
-    update payments set amount = coalesce((p_data->>'amount')::numeric, 0),
-      due_date = nullif(p_data->>'due_date','')::date, paid_on = nullif(p_data->>'paid_on','')::date,
-      cycle_start = nullif(p_data->>'cycle_start','')::date, cycle_end = nullif(p_data->>'cycle_end','')::date,
-      method = coalesce(p_data->>'method',''), note = coalesce(p_data->>'note','') where id = v_id;
+    update payments set amount = v_amount, paid_on = coalesce(nullif(p_data->>'paid_on','')::date, paid_on),
+      method = coalesce(p_data->>'method', method), note = coalesce(p_data->>'note', note)
+    where id = v_id;
   end if;
-  if nullif(p_data->>'paid_on','') is not null then
-    perform _notify_student(v_student, 'payment', 'Payment received',
-      _setting('currency','BDT') || ' ' || (p_data->>'amount'));
-  end if;
-  perform _log(a.username, 'payment.save', p_data->>'amount');
-  return jsonb_build_object('ok', true, 'id', v_id);
+
+  v_left := v_inv.total - (v_paid + v_amount);
+  perform _notify_student(v_inv.student_id, 'payment', 'Payment received',
+    _setting('currency','BDT') || ' ' || v_amount ||
+    case when v_left > 0 then ' · ' || _setting('currency','BDT') || ' ' || v_left || ' left'
+         else ' · fully paid' end);
+  perform _log(a.username, 'payment.save', v_amount::text);
+  return jsonb_build_object('ok', true, 'id', v_id, 'remaining', v_left);
 end $$;
 
 create or replace function public.admin_delete_payment(p_token text, p_id uuid)
@@ -992,6 +1110,56 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
+/** start the next cycle: fresh dates, fresh class count, and its invoice */
+create or replace function public.admin_renew(p_token text, p_student uuid, p_amount numeric default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare a admin_users; s students; v_classes int; v_months int; v_total numeric; v_end date; v_inv uuid;
+begin
+  a := _admin(p_token);
+  if a.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
+  select * into s from students where id = p_student;
+  if s.id is null then return jsonb_build_object('ok', false, 'error', 'missing'); end if;
+
+  v_classes := case s.course when 'advanced' then 16 when 'private' then 12 else 8 end;
+  v_months  := case s.course when 'advanced' then 2 else 1 end;
+  v_end     := (_today() + make_interval(months => v_months))::date;
+  v_total   := coalesce(p_amount, _price(s.course));
+
+  update students set start_date = _today(), end_date = v_end,
+    total_classes = s.total_classes + v_classes, active = true
+  where id = p_student;
+
+  if v_total > 0 then
+    insert into invoices (student_id, title, course, total, due_date, cycle_start, cycle_end)
+      values (p_student, to_char(_today(), 'Mon YYYY'), s.course, v_total, _today(), _today(), v_end)
+      returning id into v_inv;
+  end if;
+
+  perform _notify_student(p_student, 'renewed', 'Course renewed',
+    to_char(_today(), 'DD Mon') || ' – ' || to_char(v_end, 'DD Mon'));
+  perform _log(a.username, 'student.renew', s.name);
+  return jsonb_build_object('ok', true, 'invoice', v_inv, 'end_date', v_end,
+    'total_classes', s.total_classes + v_classes);
+end $$;
+
+/** 0 = never seen, 1 = seen at least once, 2 = muted */
+create or replace function public.set_guide(p_token text, p_value int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare st students; a admin_users;
+begin
+  st := _student(p_token);
+  if st.id is not null then
+    update students set guide = greatest(coalesce(p_value,1), 0) where id = st.id;
+    return jsonb_build_object('ok', true);
+  end if;
+  a := _admin(p_token);
+  if a.id is not null then
+    update admin_users set guide = greatest(coalesce(p_value,1), 0) where id = a.id;
+    return jsonb_build_object('ok', true);
+  end if;
+  return jsonb_build_object('ok', false, 'error', 'auth');
+end $$;
+
 create or replace function public.admin_save_settings(p_token text, p_data jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare a admin_users; k text;
@@ -1000,7 +1168,8 @@ begin
   if a.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
   for k in select jsonb_object_keys(p_data) loop
     if k in ('academy_name','timezone','contact_phone','whatsapp','currency','capacity',
-             'reply_hours','cancel_cutoff_h','directory','telegram_token','telegram_chat') then
+             'reply_hours','cancel_cutoff_h','directory','telegram_token','telegram_chat',
+             'price_basic','price_advanced','price_private') then
       insert into app_settings (key, value) values (k, p_data->>k)
         on conflict (key) do update set value = excluded.value;
     end if;
@@ -1086,6 +1255,7 @@ begin
     'roster',     (select coalesce(jsonb_agg(to_jsonb(s)), '[]'::jsonb) from slot_students s),
     'attendance', (select coalesce(jsonb_agg(to_jsonb(x)), '[]'::jsonb) from attendance x),
     'bookings',   (select coalesce(jsonb_agg(to_jsonb(b)), '[]'::jsonb) from bookings b),
+    'invoices',   (select coalesce(jsonb_agg(to_jsonb(i)), '[]'::jsonb) from invoices i),
     'payments',   (select coalesce(jsonb_agg(to_jsonb(p)), '[]'::jsonb) from payments p),
     'closures',   (select coalesce(jsonb_agg(to_jsonb(c)), '[]'::jsonb) from closures c),
     'settings',   (select coalesce(jsonb_object_agg(key, value), '{}'::jsonb) from app_settings)));
@@ -1150,9 +1320,19 @@ begin
       on conflict (id) do nothing;
   end loop;
 
+  for r in select * from jsonb_array_elements(coalesce(p_data->'invoices','[]'::jsonb)) loop
+    insert into invoices (id, student_id, title, course, total, due_date, cycle_start, cycle_end, note)
+      values ((r->>'id')::uuid, (r->>'student_id')::uuid, coalesce(r->>'title',''),
+              coalesce(r->>'course',''), coalesce((r->>'total')::numeric,0),
+              nullif(r->>'due_date','')::date, nullif(r->>'cycle_start','')::date,
+              nullif(r->>'cycle_end','')::date, coalesce(r->>'note',''))
+      on conflict (id) do nothing;
+  end loop;
+
   for r in select * from jsonb_array_elements(coalesce(p_data->'payments','[]'::jsonb)) loop
-    insert into payments (id, student_id, amount, due_date, paid_on, cycle_start, cycle_end, method, note)
-      values ((r->>'id')::uuid, (r->>'student_id')::uuid, coalesce((r->>'amount')::numeric,0),
+    insert into payments (id, student_id, invoice_id, amount, due_date, paid_on, cycle_start, cycle_end, method, note)
+      values ((r->>'id')::uuid, (r->>'student_id')::uuid, nullif(r->>'invoice_id','')::uuid,
+              coalesce((r->>'amount')::numeric,0),
               nullif(r->>'due_date','')::date, nullif(r->>'paid_on','')::date,
               nullif(r->>'cycle_start','')::date, nullif(r->>'cycle_end','')::date,
               coalesce(r->>'method',''), coalesce(r->>'note',''))
@@ -1206,8 +1386,12 @@ grant execute on function
   public.admin_delete_slot(text,uuid),
   public.admin_add_to_slot(text,uuid,uuid),
   public.admin_remove_from_slot(text,uuid,uuid),
+  public.admin_save_invoice(text,jsonb),
+  public.admin_delete_invoice(text,uuid),
   public.admin_save_payment(text,jsonb),
   public.admin_delete_payment(text,uuid),
+  public.admin_renew(text,uuid,numeric),
+  public.set_guide(text,int),
   public.admin_save_settings(text,jsonb),
   public.admin_change_password(text,text,text),
   public.admin_save_user(text,jsonb),
