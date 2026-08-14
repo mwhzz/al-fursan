@@ -324,8 +324,10 @@
   const icon = (k, cls) => (ICON[k] || '').replace('<svg', '<svg class="' + (cls || 'ic') + '" aria-hidden="true"');
 
   function logo(cls) {
-    const src = (window.AF_CONFIG && AF_CONFIG.logo) || 'assets/icon.svg';
-    return '<img src="' + esc(src) + '" alt="" class="' + cls + '">';
+    const src = (window.AF_CONFIG && AF_CONFIG.logo) || 'assets/logo.png';
+    // fall back to the built-in mark rather than showing a broken image
+    return '<img src="' + esc(src) + '" alt="" class="' + cls + '" ' +
+      'onerror="this.onerror=null;this.src=\'assets/logo.svg\'">';
   }
 
   /** avatar(name, cls, course, courseWas) — courseWas remembers the hue to

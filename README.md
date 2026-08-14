@@ -173,14 +173,34 @@ two honest.
 Slot capacity defaults to 3 riders and is set per slot. Only **confirmed** bookings fill a
 seat — pending requests are shown separately so a slot never looks full before you decide.
 
-## Your logo
+## Logos and icons
 
-The app ships with its own mark (`assets/icon.svg`). To use the academy logo, drop
-`assets/logo.png` in and point `js/config.js` at it:
+Two different images, on purpose.
 
-```js
-logo: 'assets/logo.png'
+**The app icon** — home screen, browser tab, notifications. Generated from
+`assets/icon-source.jpg`, cropped square onto the horse's head so it still reads
+at 32px:
+
+```text
+assets/icon-192.png          Android / PWA
+assets/icon-512.png          PWA, splash
+assets/icon-maskable.png     Android adaptive (head inside the safe circle)
+assets/apple-touch-icon.png  iOS home screen
+assets/favicon-16/32/48.png  browser tab
 ```
+
+To change it, replace `assets/icon-source.jpg` and regenerate — crop square on the
+subject, then export those seven sizes.
+
+**The logo inside the app** — sign-in screen and top bar. Save the academy logo as:
+
+```text
+assets/logo.png
+```
+
+and it is used everywhere immediately (`js/config.js` → `logo`). Until that file
+exists the app falls back to `assets/logo.svg`, a chrome horseshoe with an AF
+monogram.
 
 ## Tests
 

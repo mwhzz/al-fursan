@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="Al Fursan Equestrian Academy">
+  <defs>
+    <linearGradient id="chrome" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="26%" stop-color="#d3dae2"/>
+      <stop offset="50%" stop-color="#6c7580"/>
+      <stop offset="72%" stop-color="#d8dee6"/>
+      <stop offset="100%" stop-color="#98a1ac"/>
+    </linearGradient>
+    <linearGradient id="letters" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="55%" stop-color="#dfe5ec"/>
+      <stop offset="100%" stop-color="#a7b0bb"/>
+    </linearGradient>
+    <radialGradient id="ground" cx="0.5" cy="0.2" r="0.95">
+      <stop offset="0%" stop-color="#18202a"/>
+      <stop offset="100%" stop-color="#080b0f"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="116" fill="url(#ground)"/>
+
+  <!-- the horseshoe: two halves, open at the top and the bottom -->
+  <circle cx="256" cy="258" r="188" fill="none" stroke="url(#chrome)" stroke-width="30"
+          stroke-linecap="round" stroke-dasharray="288 303" transform="rotate(-46 256 258)"/>
+
+  <!-- monogram, until assets/logo.png is dropped in -->
+  <text x="256" y="322" text-anchor="middle" fill="url(#letters)"
+        font-family="Georgia, 'Times New Roman', serif" font-size="200" font-weight="700"
+        letter-spacing="4">AF</text>
+</svg>

@@ -81,7 +81,8 @@
   /* ---- browser alerts (only while open — Telegram covers app-closed) ---- */
   function notify(title, body) {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-    const opts = { body, icon: 'assets/icon.svg', tag: 'af-booking', renotify: true };
+    const opts = { body, icon: 'assets/icon-192.png', badge: 'assets/favicon-48.png',
+      tag: 'af-booking', renotify: true };
     if (navigator.serviceWorker && navigator.serviceWorker.ready)
       navigator.serviceWorker.ready.then(r => r.showNotification(title, opts))
         .catch(() => { try { new Notification(title, opts); } catch (e) {} });

@@ -27,9 +27,10 @@ window.AF_CONFIG = {
   url: '',      // Supabase only — e.g. 'https://abcdefgh.supabase.co'
   anonKey: '',  // Supabase only — e.g. 'eyJhbGciOi...'
 
-  // Logo file. Default mark ta assets/icon.svg — nijer logo dile
-  // assets/logo.png rekhe niche path ta bodle dao.
-  logo: 'assets/icon.svg',
+  /* The logo shown inside the app (sign-in screen and the top bar).
+     Drop the academy logo in as assets/logo.png and it is used everywhere.
+     If that file is missing the app falls back to assets/logo.svg. */
+  logo: 'assets/logo.png',
 
   version: '2.2.0'
 };
