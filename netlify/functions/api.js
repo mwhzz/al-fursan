@@ -10,7 +10,10 @@
 const { blank, createStore } = require('../../js/store.js');
 
 const BLOB_STORE = 'al-fursan';
-const KEY = 'db';
+/* The database is created once, on the first ever request. To start over —
+   before the academy has real data — set AF_DB_KEY in the Netlify site's
+   environment variables to any new value (db2, db3…) and redeploy. */
+const KEY = process.env.AF_DB_KEY || 'db';
 
 /* Everything a signed-out visitor may call. Everything else needs a token, and
    the store checks the token itself. */

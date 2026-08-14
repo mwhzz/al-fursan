@@ -6,6 +6,7 @@
   let step = 'name';        // name -> pin
   let chosen = null;        // {id, name}
   let typed = '';
+  let staffUser = '';
   let errorMsg = '';
 
   const S = () => (boot && boot.settings) || {};
@@ -64,7 +65,11 @@
   function staffStep() {
     return '<div class="stack">' +
       '<p class="small muted">' + U.esc(t('adminPassHint')) + '</p>' +
-      '<input class="input" id="auser" placeholder="' + U.esc(t('username')) + '" autocomplete="username" value="owner">' +
+      /* Never guess a username, but keep the one that was typed: a failed
+         attempt used to wipe the field and make you start over. */
+      '<input class="input" id="auser" placeholder="' + U.esc(t('username')) +
+        '" autocomplete="username" autocapitalize="none" autocorrect="off"' +
+        ' value="' + U.esc(staffUser) + '">' +
       '<input class="input" id="apass" type="password" placeholder="' + U.esc(t('password')) + '" autocomplete="current-password">' +
       (errorMsg ? '<p class="form-error">' + U.esc(errorMsg) + '</p>' : '') +
       '<button class="btn primary block" id="ago">' + U.esc(t('login')) + '</button>' +
@@ -93,7 +98,9 @@
 
         '<div class="row" style="justify-content:center;gap:8px;margin-top:12px">' +
           '<button class="btn sm ghost" id="langBtn">' + (I18N.lang === 'en' ? 'বাংলা' : 'EN') + '</button>' +
-          '<button class="btn sm ghost" id="modeBtn">' + U.esc(isStaff ? t('login') : t('staffLogin')) + '</button>' +
+          // says where it takes you, not "Sign in" a second time
+          '<button class="btn sm ghost" id="modeBtn">' +
+            U.esc(isStaff ? t('riderLogin') : t('staffLogin')) + '</button>' +
         '</div>' +
 
         (API.LIVE ? '' : '<p class="tiny dim" style="margin-top:14px">Demo · Zawad / 1111 · staff: owner / alfursan</p>') +
@@ -211,6 +218,7 @@
   async function doAdminLogin() {
     const user = document.getElementById('auser').value.trim();
     const pass = document.getElementById('apass').value;
+    staffUser = user;                       // survives the re-render on failure
     if (!user || !pass) { errorMsg = t('fillAll'); return loginView(); }
     busy('#ago', true);
     try {

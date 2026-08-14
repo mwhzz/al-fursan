@@ -59,6 +59,12 @@ Change both from **Settings → Change password** on first sign-in — these are
 written in this repository, so they are not secret. There are no sample riders on
 a live site; add your own from **Riders → +**.
 
+**If the site was deployed before these accounts existed**, the database was
+already created and still holds whatever it was seeded with. Either sign in with
+the old account and add the owners from **Settings → Staff accounts**, or, while
+there is no real data yet, start over: in Netlify set the environment variable
+`AF_DB_KEY` to `db2` and redeploy. The next request builds a fresh academy.
+
 ### Your own domain
 
 Netlify → **Domain management → Add a domain**. Point your registrar at Netlify's
