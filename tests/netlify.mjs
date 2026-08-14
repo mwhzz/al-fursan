@@ -59,12 +59,21 @@ const idsA = blob.slots.map(s => s.id).join();
 await post('bootstrap', {});
 ok('and again after another request', blob.slots.map(s => s.id).join() === idsA);
 
-const admin = await post('admin_login', { p_user: 'owner', p_pass: 'alfursan', p_days: 7 });
-ok('the owner account works', admin.body.ok && admin.body.token, admin.body);
+const admin = await post('admin_login', { p_user: 'tahiya', p_pass: 'Tahiya#Fursan26', p_days: 7 });
+ok('an owner account works', admin.body.ok && admin.body.token, admin.body);
 ok('signing in is persisted', writes === 2, writes);
 const A = admin.body.token;
 
-ok('a wrong password is refused', !(await post('admin_login', { p_user: 'owner', p_pass: 'nope' })).body.ok);
+ok('a wrong password is refused', !(await post('admin_login', { p_user: 'tahiya', p_pass: 'nope' })).body.ok);
+ok('both owners exist on a live site',
+  (await post('admin_login', { p_user: 'fahim', p_pass: 'Fahim#Fursan26', p_days: 7 })).body.ok);
+
+/* the demo account's password is published in this repository, so it must not
+   exist on a real academy */
+ok('the demo account does not exist live',
+  !(await post('admin_login', { p_user: 'owner', p_pass: 'alfursan' })).body.ok);
+ok('only the two owners are seeded', blob.admins.length === 2,
+  blob.admins.map(a => a.username));
 
 /* --------------------------------------------------- a real day of use --*/
 const rider = await post('admin_save_student', {

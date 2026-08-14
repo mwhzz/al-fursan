@@ -217,6 +217,14 @@ insert into admin_users (username, pass, display, role)
 select 'owner', coalesce((select value from app_settings where key='admin_password'), 'alfursan'), 'Owner', 'owner'
 where not exists (select 1 from admin_users);
 
+-- the academy's owners
+insert into admin_users (username, pass, display, role)
+select * from (values
+  ('tahiya', 'Tahiya#Fursan26', 'Tahiya', 'owner'),
+  ('fahim',  'Fahim#Fursan26',  'Fahim',  'owner')
+) as v(username, pass, display, role)
+where not exists (select 1 from admin_users a where lower(a.username) = v.username);
+
 -- the v1 single-password setting has now been migrated into an account; don't
 -- leave a second copy of a live password lying around
 delete from app_settings where key = 'admin_password';

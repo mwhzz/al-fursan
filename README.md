@@ -16,12 +16,15 @@ The app also walks you through it on first sign-in.
 npx serve .        # or: python -m http.server 8080
 ```
 
-Demo logins (no backend needed — data stays in that browser):
+This runs with no backend at all — sample riders, data kept in that browser only:
 
 | Role  | Login |
 | ----- | ----- |
 | Rider | pick **Zawad** from the list, PIN `1111` |
 | Staff | tap **Staff**, `owner` / `alfursan` |
+
+The `owner` account is for looking around locally. A deployed site never has it —
+it gets the real owner accounts below and no sample riders.
 
 ## Deploy to Netlify — nothing else to sign up for
 
@@ -45,8 +48,16 @@ If you get a 404, the function did not deploy.
 `supabase/schema.sql` are never published.
 
 **On first load the site creates itself**: the class times (Fri/Sat/Mon/Wed at
-4:00–7:20 PM), the course prices, and one account — **owner / alfursan**. Sign in
-as Staff and change that password immediately, then add your riders.
+4:00–7:20 PM), the course prices, and the two owner accounts:
+
+| Staff sign-in | Password |
+| --- | --- |
+| `tahiya` | `Tahiya#Fursan26` |
+| `fahim` | `Fahim#Fursan26` |
+
+Change both from **Settings → Change password** on first sign-in — these are
+written in this repository, so they are not secret. There are no sample riders on
+a live site; add your own from **Riders → +**.
 
 ### Your own domain
 

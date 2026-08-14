@@ -370,9 +370,10 @@ ok('the reopened guide has a close button that draws its icon',
 ok('don\'t-show-again sits inside the dialog body', !!$('.modal .modal-body #gNever'));
 $('.modal #gNever').click();
 await wait(500);
-ok('muting the guide closes it and is remembered', $('#modal').hidden === true &&
-  JSON.parse(w.localStorage.getItem('af_demo_db_v2')).admins[0].guide === 2,
-  JSON.parse(w.localStorage.getItem('af_demo_db_v2')).admins[0].guide);
+const signedIn = () => JSON.parse(w.localStorage.getItem('af_demo_db_v2'))
+  .admins.find(a => a.username === 'owner');
+ok('muting the guide closes it and is remembered',
+  $('#modal').hidden === true && signedIn().guide === 2, signedIn().guide);
 
 ok('admin flow raised no JS errors', errors.length === 0, errors.join(' | '));
 

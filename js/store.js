@@ -87,7 +87,13 @@
       },
       students, slots, link, attendance, invoices, payments,
       bookings: [], closures: [], notifications: [],
-      admins: [{ id: uid(), username: 'owner', pass: 'alfursan', display: 'Owner', role: 'owner', active: true }],
+      admins: [
+        // the academy's owners
+        { id: uid(), username: 'tahiya', pass: 'Tahiya#Fursan26', display: 'Tahiya', role: 'owner', active: true },
+        { id: uid(), username: 'fahim', pass: 'Fahim#Fursan26', display: 'Fahim', role: 'owner', active: true },
+        // demo-only account, dropped from a real academy by blank()
+        { id: uid(), username: 'owner', pass: 'alfursan', display: 'Owner', role: 'owner', active: true }
+      ],
       sessions: {}, activity: [], errors: [], attempts: {}
     };
   }
@@ -96,6 +102,9 @@
   /** a database for a real academy: settings, class times and the owner only */
   function blank() {
     const db = seed();
+    // a real academy gets its owners and nothing else — the demo account's
+    // password is public in this repository, so it must never exist live
+    db.admins = db.admins.filter(a => a.username !== 'owner');
     db.students = [];
     db.link = [];
     db.attendance = [];
