@@ -178,8 +178,8 @@ seat — pending requests are shown separately so a slot never looks full before
 Two different images, on purpose.
 
 **The app icon** — home screen, browser tab, notifications. Generated from
-`assets/icon-source.jpg`, cropped square onto the horse's head so it still reads
-at 32px:
+`assets/icon-source.jpg`, cropped square onto the galloping group so every horse
+is in frame and centred:
 
 ```text
 assets/icon-192.png          Android / PWA
@@ -192,15 +192,13 @@ assets/favicon-16/32/48.png  browser tab
 To change it, replace `assets/icon-source.jpg` and regenerate — crop square on the
 subject, then export those seven sizes.
 
-**The logo inside the app** — sign-in screen and top bar. Save the academy logo as:
+**The logo inside the app** — sign-in screen and top bar — is `assets/logo.png`,
+the same crop. To use a different one, replace that file (`js/config.js` → `logo`
+points at it). If it is ever missing the app falls back to `assets/logo.svg`, a
+chrome horseshoe with an AF monogram.
 
-```text
-assets/logo.png
-```
-
-and it is used everywhere immediately (`js/config.js` → `logo`). Until that file
-exists the app falls back to `assets/logo.svg`, a chrome horseshoe with an AF
-monogram.
+**The sign-in backdrop** is the full photograph, `assets/hero.jpg`, behind a scrim
+so the card stays readable in both themes.
 
 ## Tests
 
