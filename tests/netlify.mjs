@@ -3,12 +3,7 @@
    data in Netlify Blobs. Storage is faked here so the endpoint can be tested
    without deploying.
 ------------------------------------------------------------------------- */
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
-
-const require = createRequire(import.meta.url);
-const dir = fileURLToPath(new URL('../', import.meta.url));
-const { makeHandler, PUBLIC } = require(dir + 'netlify/functions/api.js');
+import { makeHandler, PUBLIC } from '../netlify/functions/api.mjs';
 
 let pass = 0, fail = 0;
 const ok = (label, cond, extra) => {
@@ -25,19 +20,23 @@ const fakeStore = {
 };
 const handler = makeHandler(async () => fakeStore);
 
+const URL_ = 'https://academy.test/api/rpc';
+const req = (method, body) => new Request(URL_, {
+  method, headers: { 'Content-Type': 'application/json' },
+  body: method === 'POST' ? body : undefined
+});
 const post = async (fn, args) => {
-  const res = await handler({ httpMethod: 'POST', body: JSON.stringify({ fn, args: args || {} }) });
-  return { status: res.statusCode, body: JSON.parse(res.body || '{}') };
+  const res = await handler(req('POST', JSON.stringify({ fn, args: args || {} })));
+  const text = await res.text();
+  return { status: res.status, body: text ? JSON.parse(text) : {} };
 };
 
 /* ---------------------------------------------------------- the endpoint --*/
-ok('OPTIONS is answered for CORS',
-  (await handler({ httpMethod: 'OPTIONS' })).statusCode === 204);
-ok('GET is refused', (await handler({ httpMethod: 'GET' })).statusCode === 405);
-ok('a broken body is refused',
-  (await handler({ httpMethod: 'POST', body: '{oops' })).statusCode === 400);
+ok('OPTIONS is answered for CORS', (await handler(req('OPTIONS'))).status === 204);
+ok('GET is refused', (await handler(req('GET'))).status === 405);
+ok('a broken body is refused', (await handler(req('POST', '{oops'))).status === 400);
 ok('an unknown function name is refused',
-  (await handler({ httpMethod: 'POST', body: JSON.stringify({ fn: 'DROP TABLE' }) })).statusCode === 400);
+  (await handler(req('POST', JSON.stringify({ fn: 'DROP TABLE' })))).status === 400);
 ok('a private call without a token is refused',
   (await post('admin_session', {})).status === 401);
 ok('a function that does not exist is a 404',
@@ -118,8 +117,8 @@ ok('and is notified', after.body.notifications.some(x => x.kind === 'approved'))
 
 /* everything survives a cold start, because it lives in the blob */
 const revived = makeHandler(async () => fakeStore);
-const cold = await revived({ httpMethod: 'POST', body: JSON.stringify({ fn: 'student_session', args: { p_token: Z } }) });
-ok('a new function instance still knows the session', JSON.parse(cold.body).ok);
+const cold = await revived(req('POST', JSON.stringify({ fn: 'student_session', args: { p_token: Z } })));
+ok('a new function instance still knows the session', (await cold.json()).ok);
 
 ok('the public surface is the sign-in path only',
   [...PUBLIC].sort().join(',') === 'admin_login,bootstrap,log_error,logout,student_login',

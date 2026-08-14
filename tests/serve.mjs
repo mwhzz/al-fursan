@@ -25,7 +25,7 @@ if (fresh && fs.existsSync(DB_FILE)) fs.unlinkSync(DB_FILE);
 execFileSync(process.execPath, [path.join(root, 'build.js')], { stdio: 'inherit' });
 const dist = path.join(root, 'dist');
 
-const { makeHandler } = require(path.join(root, 'netlify/functions/api.js'));
+const { makeHandler } = await import(new URL('../netlify/functions/api.mjs', import.meta.url));
 const fileStore = {
   async get() {
     try { return JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch (e) { return null; }
@@ -47,9 +47,15 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/api/rpc') {
     const chunks = [];
     for await (const c of req) chunks.push(c);
-    const out = await handler({ httpMethod: req.method, body: Buffer.concat(chunks).toString() });
-    res.writeHead(out.statusCode, out.headers || {});
-    res.end(out.body || '');
+    const body = Buffer.concat(chunks);
+    const out = await handler(new Request('http://localhost' + req.url, {
+      method: req.method,
+      headers: { 'Content-Type': 'application/json' },
+      body: req.method === 'GET' || req.method === 'HEAD' ? undefined : body
+    }));
+    const text = await out.text();
+    res.writeHead(out.status, Object.fromEntries(out.headers));
+    res.end(text);
     return;
   }
 

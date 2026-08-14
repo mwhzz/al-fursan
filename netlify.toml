@@ -8,10 +8,8 @@
   # the store is shared with the browser, so it lives outside the functions folder
   included_files = ["js/store.js"]
 
-[[redirects]]
-  from = "/api/rpc"
-  to = "/.netlify/functions/api"
-  status = 200
+# /api/rpc is declared by the function itself (export const config), so no
+# redirect is needed for it.
 
 # the app is one page with hash routing; anything else still lands on it.
 # Existing files win over this rule, so assets are unaffected.
