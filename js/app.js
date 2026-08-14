@@ -314,14 +314,19 @@
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; });
   window.AF_INSTALL = function () {
     if (deferred) { deferred.prompt(); deferred = null; return; }
-    const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    /* iPhone never fires the install event, so the only way in is the Share
+       sheet. Spell it out — this is the whole path on iOS. */
+    const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const steps = iOS
+      ? [t('iosStep1'), t('iosStep2'), t('iosStep3')]
+      : [t('androidStep1'), t('androidStep2')];
     U.dialog({
       title: t('installApp'),
-      body: '<p class="muted">' + U.esc(iOS ? t('iosInstall')
-        : 'Chrome: ⋮ → Add to Home screen') + '</p>' +
-        (iOS ? '<ol class="small muted" style="padding-left:20px;display:grid;gap:6px">' +
-          '<li>' + U.esc('Safari') + '</li><li>' + U.esc('Share') + '</li>' +
-          '<li>' + U.esc('Add to Home Screen') + '</li></ol>' : ''),
+      body: '<p class="muted">' + U.esc(iOS ? t('iosInstall') : t('androidInstall')) + '</p>' +
+        '<ol class="small" style="padding-left:20px;display:grid;gap:8px;color:var(--txt)">' +
+        steps.map(s => '<li>' + U.esc(s) + '</li>').join('') + '</ol>' +
+        '<p class="tiny dim">' + U.esc(t('installWhy')) + '</p>',
       actions: '<button class="btn primary block" data-close>' + U.esc(t('close')) + '</button>'
     });
   };
