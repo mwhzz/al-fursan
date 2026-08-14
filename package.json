@@ -1,6 +1,6 @@
 {
   "name": "al-fursan",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "private": true,
   "description": "Al Fursan Equestrian Academy — rider portal and class management",
   "scripts": {
@@ -8,6 +8,7 @@
     "test": "cd tests && npm test"
   },
   "dependencies": {
-    "@netlify/blobs": "^8.1.0"
+    "@netlify/blobs": "^8.1.0",
+    "web-push": "^3.6.7"
   }
 }

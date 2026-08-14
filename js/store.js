@@ -116,7 +116,14 @@
     return db;
   }
 
-  function createStore(db, commit) {
+  /* createStore(db, commit, alert)
+
+     `alert(title, body)` carries the messages that must reach the academy while
+     nobody has the app open. The store cannot send them itself — it also runs
+     in a browser — so it hands them over and the caller delivers them (a push
+     notification from the Netlify function). Without an `alert`, the app simply
+     has no outside notifications. */
+  function createStore(db, commit, alert) {
 
   /* ---------------- helpers mirroring the SQL ones ---------------- */
   const setting = (k, d) => { const v = db.settings[k]; return (v === undefined || v === null) ? (d || '') : v; };
@@ -209,6 +216,8 @@
     price_basic: setting('price_basic', '5500'),
     price_advanced: setting('price_advanced', '12000'),
     price_private: setting('price_private', '15000'),
+    // the browser needs this to subscribe to push; the private half never leaves the server
+    vapid_public: setting('vapid_public'),
     today: today()
   });
 
@@ -243,6 +252,24 @@
     const t = tok();
     db.sessions[t] = { kind, subject, expires: Date.now() + Math.max(1, days || 7) * 864e5 };
     return t;
+  }
+
+  /** hand an outside notification to the caller; never let it break a request */
+  function alert_(title, body) {
+    if (!alert) return;
+    try { alert(String(title), String(body || '')); } catch (e) { /* delivery is best effort */ }
+  }
+  /** "17 Aug, 4:00 PM" for a slot on a date */
+  function occasion(date, slotId) {
+    const s = db.slots.find(x => x.id === slotId) || {};
+    const d = new Date(date + 'T00:00:00');
+    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()];
+    let t = s.time || '';
+    if (t) {
+      const [h, m] = t.split(':').map(Number);
+      t = ', ' + (h % 12 === 0 ? 12 : h % 12) + ':' + String(m).padStart(2, '0') + ' ' + (h >= 12 ? 'PM' : 'AM');
+    }
+    return d.getDate() + ' ' + mon + t;
   }
 
   function promoteWaitlist(slotId, date) {
@@ -343,6 +370,8 @@
       db.bookings.push({ id: uid(), student_id: s.id, slot_id: p_slot, date: p_date,
         status, note: p_note || '', reason: '', seen: false, created_at: nowISO(), decided_at: null });
       log(s.name, 'booking.request', p_date);
+      alert_(status === 'waitlist' ? 'New waitlist request' : 'New booking request',
+        s.name + ' — ' + occasion(p_date, p_slot));
       commit();
       return { ok: true, status };
     },
@@ -359,6 +388,8 @@
         return { ok: false, error: 'cutoff', hours: cutoff };
       b.status = 'cancelled'; b.reason = p_reason || ''; b.decided_at = nowISO();
       log(s.name, 'booking.cancel', p_reason || '');
+      alert_('Booking cancelled',
+        s.name + ' — ' + occasion(b.date, b.slot_id) + (p_reason ? ' · ' + p_reason : ''));
       promoteWaitlist(b.slot_id, b.date);
       commit();
       return { ok: true };
@@ -379,6 +410,8 @@
         ['pending', 'approved', 'waitlist'].includes(b.status))
         .forEach(b => { b.status = 'cancelled'; b.reason = 'could not attend'; b.decided_at = nowISO(); });
       log(s.name, 'absence.notice', p_date);
+      alert_('Rider cannot attend',
+        s.name + ' — ' + occasion(p_date, p_slot) + (p_reason ? ' · ' + p_reason : ''));
       promoteWaitlist(p_slot, p_date);
       commit();
       return { ok: true };
@@ -850,8 +883,36 @@
     admin_notify_test({ p_token }) {
       const a = adminOf(p_token);
       if (!a) return DENY;
-      if (!setting('telegram_token') || !setting('telegram_chat')) return { ok: false, error: 'unset' };
-      return { ok: true, demo: true };
+      const subs = (db.pushSubs || []).length;
+      if (!subs && !setting('telegram_token')) return { ok: false, error: 'unset' };
+      alert_('Al Fursan', 'Test alert - notifications are working.');
+      return { ok: true, devices: subs };
+    },
+
+    /* One phone signs up to be told about bookings while the app is closed.
+       The subscription comes from the browser's push service; we only store it. */
+    push_subscribe({ p_token, p_sub }) {
+      const a = adminOf(p_token);
+      if (!a) return DENY;
+      if (!p_sub || !p_sub.endpoint) return { ok: false, error: 'sub' };
+      db.pushSubs = db.pushSubs || [];
+      const row = {
+        endpoint: p_sub.endpoint, keys: p_sub.keys || {},
+        admin_id: a.id, admin: a.username, created_at: nowISO()
+      };
+      const i = db.pushSubs.findIndex(s => s.endpoint === p_sub.endpoint);
+      if (i >= 0) db.pushSubs[i] = row; else db.pushSubs.push(row);
+      log(a.username, 'push.subscribe', '');
+      commit();
+      return { ok: true, devices: db.pushSubs.length };
+    },
+
+    push_unsubscribe({ p_token, p_endpoint }) {
+      const a = adminOf(p_token);
+      if (!a) return DENY;
+      db.pushSubs = (db.pushSubs || []).filter(s => s.endpoint !== p_endpoint);
+      commit();
+      return { ok: true, devices: db.pushSubs.length };
     },
 
     admin_export({ p_token }) {

@@ -62,6 +62,22 @@ self.addEventListener('fetch', e => {
   );
 });
 
+/* A booking arrived while the app was closed. This runs without any page open,
+   which is the whole point of push. */
+self.addEventListener('push', e => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (err) { data = { body: e.data && e.data.text() }; }
+  const title = data.title || 'Al Fursan';
+  e.waitUntil(self.registration.showNotification(title, {
+    body: data.body || '',
+    icon: 'assets/icon-192.png',
+    badge: 'assets/favicon-48.png',
+    tag: data.tag || 'af-alert',
+    renotify: true,
+    data: { url: data.url || '/#/admin/requests' }
+  }));
+});
+
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   e.waitUntil(clients.matchAll({ type: 'window' }).then(list => {

@@ -135,7 +135,8 @@
       backOnline: 'Back online', netErr: 'Could not reach the academy. Check your connection.',
       updateReady: 'New version available', reload: 'Reload', newActivity: 'New activity — tap to refresh',
       areYouSure: 'Are you sure?', nothingHere: 'Nothing here yet',
-      notifyOn: 'Alert me on new bookings', notifyBlocked: 'Notifications are blocked in browser settings',
+      notifyOn: 'Turn on notifications',
+      notifyOpenOnly: 'Alerts will show while the app is open on this device', notifyBlocked: 'Notifications are blocked in browser settings',
       notifyReady: 'Alerts on', notifyClosedHint: 'Browser alerts only arrive while the app is open. For alerts with the app closed, set up Telegram below.',
 
       sun: 'Sunday', mon: 'Monday', tue: 'Tuesday', wed: 'Wednesday', thu: 'Thursday', fri: 'Friday', sat: 'Saturday',
@@ -271,7 +272,8 @@
       netErr: 'একাডেমির সাথে যোগাযোগ হচ্ছে না। ইন্টারনেট দেখুন।',
       updateReady: 'নতুন ভার্সন এসেছে', reload: 'রিলোড', newActivity: 'নতুন আপডেট — রিফ্রেশ করুন',
       areYouSure: 'আপনি কি নিশ্চিত?', nothingHere: 'এখানে কিছু নেই',
-      notifyOn: 'নতুন বুকিংয়ে অ্যালার্ট', notifyBlocked: 'ব্রাউজার সেটিংসে নোটিফিকেশন বন্ধ',
+      notifyOn: 'নোটিফিকেশন চালু করুন',
+      notifyOpenOnly: 'এই ডিভাইসে অ্যাপ খোলা থাকলে অ্যালার্ট দেখাবে', notifyBlocked: 'ব্রাউজার সেটিংসে নোটিফিকেশন বন্ধ',
       notifyReady: 'অ্যালার্ট চালু',
       notifyClosedHint: 'ব্রাউজার অ্যালার্ট শুধু অ্যাপ খোলা থাকলে আসে। অ্যাপ বন্ধ থাকলেও পেতে নিচে টেলিগ্রাম সেট করুন।',
 

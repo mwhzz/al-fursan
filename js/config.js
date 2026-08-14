@@ -32,5 +32,5 @@ window.AF_CONFIG = {
      If that file is missing the app falls back to assets/logo.svg. */
   logo: 'assets/logo.png',
 
-  version: '2.2.0'
+  version: '2.3.0'
 };

@@ -188,6 +188,8 @@
     saveUser: data => rpc('admin_save_user', { p_token: T(), p_data: data }),
     deleteUser: id => rpc('admin_delete_user', { p_token: T(), p_id: id }),
     notifyTest: () => rpc('admin_notify_test', { p_token: T() }),
+    pushSubscribe: sub => rpc('push_subscribe', { p_token: T(), p_sub: sub }),
+    pushUnsubscribe: endpoint => rpc('push_unsubscribe', { p_token: T(), p_endpoint: endpoint }),
     exportAll: () => rpc('admin_export', { p_token: T() }),
     importAll: (data, mode) => rpc('admin_import', { p_token: T(), p_data: data, p_mode: mode || 'preview' }),
 

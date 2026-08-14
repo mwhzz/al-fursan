@@ -97,11 +97,41 @@
     });
     knownPending = new Set(ids);
   }
+  /* Ask for permission, then register this phone with the push service so a
+     booking reaches it with the app closed. Permission alone only covers the
+     app being open. */
   async function askNotify() {
     if (typeof Notification === 'undefined') return U.toast(t('notifyBlocked'), 'err');
     const p = await Notification.requestPermission();
-    U.toast(p === 'granted' ? t('notifyReady') : t('notifyBlocked'), p === 'granted' ? 'ok' : 'err');
+    if (p !== 'granted') { U.toast(t('notifyBlocked'), 'err'); return render(); }
+
+    try {
+      const key = (D.settings || {}).vapid_public;
+      if (!key || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        U.toast(t('notifyOpenOnly'));      // in-app alerts only on this device
+        return render();
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key)
+      });
+      const res = await API.pushSubscribe(JSON.parse(JSON.stringify(sub)));
+      U.toast(res && res.ok ? t('notifyReady') : t('netErr'), res && res.ok ? 'ok' : 'err');
+    } catch (e) {
+      // permission is granted, so alerts still work while the app is open
+      U.toast(t('notifyOpenOnly'));
+    }
     render();
+  }
+
+  /** the push service wants the key as bytes, not base64url text */
+  function urlBase64ToUint8Array(base64) {
+    const padded = (base64 + '='.repeat((4 - base64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(padded);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
   }
 
   /* ================================ TODAY ================================ */

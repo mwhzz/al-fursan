@@ -11,6 +11,7 @@
    POST /api/rpc   { "fn": "student_login", "args": { ... } }  ->  { ... }
 -------------------------------------------------------------------------*/
 import { getStore } from '@netlify/blobs';
+import webpush from 'web-push';
 import storeModule from '../../js/store.js';
 
 const { blank, createStore } = storeModule;
@@ -24,6 +25,43 @@ const KEY = process.env.AF_DB_KEY || 'db';
 /* Everything a signed-out visitor may call. Everything else needs a token, and
    the store checks the token itself. */
 export const PUBLIC = new Set(['bootstrap', 'student_login', 'admin_login', 'log_error', 'logout']);
+
+/* Push notifications, so a booking reaches the academy with the app closed.
+   The signing keys are made once and kept in the database — the private half
+   never leaves the server, and there is nothing to configure by hand. */
+function ensureKeys(db) {
+  if (db.settings.vapid_public && db.settings.vapid_private) return false;
+  const keys = webpush.generateVAPIDKeys();
+  db.settings.vapid_public = keys.publicKey;
+  db.settings.vapid_private = keys.privateKey;
+  return true;
+}
+
+async function deliver(db, alerts) {
+  const subs = db.pushSubs || [];
+  if (!alerts.length || !subs.length) return false;
+
+  webpush.setVapidDetails(
+    'mailto:academy@alfursan.invalid', db.settings.vapid_public, db.settings.vapid_private);
+
+  let changed = false;
+  for (const alert of alerts) {
+    const payload = JSON.stringify({ title: alert.title, body: alert.body, url: '/#/admin/requests' });
+    const results = await Promise.allSettled(
+      subs.map(s => webpush.sendNotification(
+        { endpoint: s.endpoint, keys: s.keys }, payload, { TTL: 21600 })));
+
+    results.forEach((r, i) => {
+      // 404/410 mean the browser threw the subscription away; stop carrying it
+      const code = r.status === 'rejected' && r.reason && r.reason.statusCode;
+      if (code === 404 || code === 410) {
+        db.pushSubs = (db.pushSubs || []).filter(x => x.endpoint !== subs[i].endpoint);
+        changed = true;
+      }
+    });
+  }
+  return changed;
+}
 
 const HEADERS = {
   'Content-Type': 'application/json',
@@ -66,8 +104,12 @@ export function makeHandler(openStore) {
     let created = false;
     if (!db) { db = blank(); created = true; }
 
+    if (ensureKeys(db)) created = true;          // first run: make the push keys
+
     let dirty = false;
-    const handlers = createStore(db, () => { dirty = true; });
+    const alerts = [];
+    const handlers = createStore(db, () => { dirty = true; },
+      (title, body) => alerts.push({ title, body }));
     if (!handlers[fn]) return reply(404, { ok: false, error: 'unknown' });
 
     let out;
@@ -76,6 +118,12 @@ export function makeHandler(openStore) {
     } catch (e) {
       return reply(500, { ok: false, error: 'handler', message: String((e && e.message) || e) });
     }
+
+    // send before saving, so a subscription the browser has dropped is pruned
+    // in the same write
+    try {
+      if (await deliver(db, alerts)) dirty = true;
+    } catch (e) { /* a failed notification must never fail the request */ }
 
     if (dirty || created) {
       try { await store.setJSON(KEY, db); }
