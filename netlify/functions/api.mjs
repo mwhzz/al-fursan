@@ -86,14 +86,22 @@ export function makeHandler(openStore) {
 }
 
 /* Blobs configures itself on Netlify. If a site somehow lacks that context, it
-   can be supplied through environment variables instead. */
+   can be supplied through environment variables instead.
+
+   consistency: 'strong' is not optional here. By default a blob read may serve
+   a slightly stale copy, and this app writes a session then reads it back on
+   the very next request — with the default, signing in returned "auth" for a
+   second or two afterwards and the app reported that it could not reach the
+   academy. */
+const OPTS = { consistency: 'strong' };
+
 function openBlobs(name) {
   try {
-    return getStore(name);
+    return getStore({ name, ...OPTS });
   } catch (e) {
     const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
     const token = process.env.NETLIFY_API_TOKEN || process.env.NETLIFY_AUTH_TOKEN;
-    if (siteID && token) return getStore({ name, siteID, token, consistency: 'strong' });
+    if (siteID && token) return getStore({ name, siteID, token, ...OPTS });
     throw e;
   }
 }
