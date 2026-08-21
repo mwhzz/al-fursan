@@ -57,6 +57,12 @@
       pickDate: 'Pick a date', nothingOn: 'No classes on this day',
       bookingHistory: 'Past requests',
 
+      /* guest booking (no account) */
+      guestIntro: 'See the schedule and book a class — no account needed',
+      guestNameHint: 'Your name, so the academy knows who is coming',
+      myRequests: 'My requests',
+      signInInstead: 'Already have an account? Sign in', guestBadge: 'Guest',
+
       /* profile */
       myProfile: 'My profile', phone: 'Phone', changePin: 'Change PIN', newPin: 'New PIN',
       profileSaved: 'Saved', fees: 'Fees', paid: 'Paid', due: 'Due', unpaid: 'Unpaid',
@@ -195,6 +201,11 @@
       noBalance: 'কোর্সে আর কোনো ক্লাস বাকি নেই', courseExpired: 'আপনার কোর্সের মেয়াদ শেষ',
       pickDate: 'তারিখ বাছুন', nothingOn: 'এই দিনে কোনো ক্লাস নেই',
       bookingHistory: 'আগের রিকোয়েস্ট',
+
+      guestIntro: 'সময়সূচি দেখুন ও ক্লাস বুক করুন — কোনো অ্যাকাউন্ট লাগবে না',
+      guestNameHint: 'আপনার নাম — একাডেমি জানবে কে আসছে',
+      myRequests: 'আমার রিকোয়েস্ট',
+      signInInstead: 'আগে থেকে অ্যাকাউন্ট আছে? সাইন-ইন করুন', guestBadge: 'গেস্ট',
 
       myProfile: 'আমার প্রোফাইল', phone: 'ফোন', changePin: 'পিন বদলান', newPin: 'নতুন পিন',
       profileSaved: 'সেভ হয়েছে', fees: 'ফি', paid: 'পরিশোধিত', due: 'বাকি', unpaid: 'বকেয়া',

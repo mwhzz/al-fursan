@@ -25,6 +25,15 @@ create table if not exists students (
 );
 create unique index if not exists students_name_uniq on students (lower(name));
 
+-- a visitor who books without an account gets a hidden row here instead of a
+-- parallel table, so every rule written in terms of student_id (seat counts,
+-- waitlist promotion, the admin booking list) keeps working unchanged
+alter table students add column if not exists is_guest boolean not null default false;
+alter table students add column if not exists guest_key text;
+drop index if exists students_name_uniq;
+create unique index if not exists students_name_uniq on students (lower(name)) where not is_guest;
+create unique index if not exists students_guest_key_uniq on students (guest_key) where is_guest;
+
 create table if not exists slots (
   id       uuid primary key default gen_random_uuid(),
   day      int  not null check (day between 0 and 6),   -- 0 = Sunday
@@ -286,6 +295,28 @@ begin
   return st;
 end $$;
 
+create or replace function public._guest(p_key text)
+returns students language sql security definer stable set search_path = public as $$
+  select * from students where guest_key = p_key and is_guest;
+$$;
+
+-- find-or-create the hidden row behind one device's guest_key
+create or replace function public._guest_upsert(p_key text, p_name text, p_phone text)
+returns students language plpgsql security definer set search_path = public as $$
+declare s students;
+begin
+  select * into s from students where guest_key = p_key and is_guest;
+  if s.id is null then
+    insert into students (name, pin, phone, course, total_classes, start_date, active, is_guest, guest_key)
+      values (p_name, '0000', coalesce(p_phone,''), 'basic', 0, _today(), false, true, p_key)
+      returning * into s;
+  else
+    update students set name = p_name, phone = coalesce(nullif(p_phone,''), phone)
+      where id = s.id returning * into s;
+  end if;
+  return s;
+end $$;
+
 create or replace function public._log(p_actor text, p_action text, p_detail text default '')
 returns void language sql security definer set search_path = public as $$
   insert into activity_log (actor, action, detail) values (p_actor, p_action, p_detail);
@@ -355,6 +386,23 @@ returns int language sql security definer stable set search_path = public as $$
    where slot_id = p_slot and date = p_date and status = 'pending';
 $$;
 
+-- confirmed + waiting seat counts for every active slot, next 5 weeks —
+-- shared by bootstrap() (signed-out) and student_session() (signed-in)
+create or replace function public._seats_map()
+returns jsonb language sql security definer stable set search_path = public as $$
+  -- key must be exactly "<slot uuid>|YYYY-MM-DD": generate_series returns a
+  -- timestamp, and d::text would render "2026-08-14 00:00:00", which never
+  -- matches the key the client builds.
+  select coalesce((select jsonb_object_agg(k, v) from (
+      select (s.id::text || '|' || d::date::text) k,
+             jsonb_build_object('taken', _slot_taken(s.id, d::date),
+                                'pending', _slot_pending(s.id, d::date)) v
+      from slots s
+      cross join generate_series(_today()::timestamp, (_today() + 34)::timestamp, interval '1 day') g(d)
+      where s.active and extract(dow from d)::int = s.day
+    ) q), '{}'::jsonb);
+$$;
+
 create or replace function public._schedule(p_admin boolean default false)
 returns jsonb language sql security definer stable set search_path = public as $$
   select coalesce(jsonb_agg(x order by (x->>'day')::int, x->>'time'), '[]'::jsonb) from (
@@ -385,7 +433,8 @@ returns jsonb language sql security definer stable set search_path = public as $
     'unpaid', greatest(0,
         (select coalesce(sum(i.total),0) from invoices i where i.student_id = s.id)
       - (select coalesce(sum(p.amount),0) from payments p where p.student_id = s.id)),
-    'guide', s.guide
+    'guide', s.guide,
+    'is_guest', s.is_guest
   ) || case when p_admin then jsonb_build_object('pin', s.pin) else '{}'::jsonb end
   from students s where s.id = p_id;
 $$;
@@ -435,7 +484,14 @@ returns jsonb language sql security definer set search_path = public as $$
     'directory', case when _setting('directory','on') = 'on' then
       coalesce((select jsonb_agg(jsonb_build_object('id', id, 'name', name) order by name)
                 from students where active), '[]'::jsonb)
-      else '[]'::jsonb end);
+      else '[]'::jsonb end,
+    -- lets a signed-out visitor see the schedule and seat counts before they
+    -- have any reason to log in or book anything
+    'schedule', _schedule(),
+    'seats', _seats_map(),
+    'closures', coalesce((select jsonb_agg(jsonb_build_object(
+        'date', c.date, 'slot_id', c.slot_id, 'reason', c.reason))
+        from closures c where c.date >= _today()), '[]'::jsonb));
 $$;
 
 create or replace function public.student_login(p_id uuid, p_name text, p_pin text, p_days int default 30)
@@ -498,33 +554,53 @@ begin
     'closures', coalesce((select jsonb_agg(jsonb_build_object(
         'date', c.date, 'slot_id', c.slot_id, 'reason', c.reason))
         from closures c where c.date >= _today()), '[]'::jsonb),
-    -- key must be exactly "<slot uuid>|YYYY-MM-DD": generate_series returns a
-    -- timestamp, and d::text would render "2026-08-14 00:00:00", which never
-    -- matches the key the client builds.
-    'seats', coalesce((select jsonb_object_agg(k, v) from (
-        select (s.id::text || '|' || d::date::text) k,
-               jsonb_build_object('taken', _slot_taken(s.id, d::date),
-                                  'pending', _slot_pending(s.id, d::date)) v
-        from slots s
-        cross join generate_series(_today()::timestamp, (_today() + 34)::timestamp, interval '1 day') g(d)
-        where s.active and extract(dow from d)::int = s.day
-      ) q), '{}'::jsonb),
+    'seats', _seats_map(),
     'schedule', _schedule()
   );
 end $$;
 
-create or replace function public.student_book(p_token text, p_slot uuid, p_date date, p_note text default '')
+-- past/closed/missing/day/duplicate checks, the capacity/waitlist call, and
+-- the insert itself — shared by student_book and guest_book so the two paths
+-- (and the two backends) cannot drift on what "a valid booking" means
+create or replace function public._book(p_student uuid, p_slot uuid, p_date date, p_note text default '')
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare st students; v_cap int; v_day int; v_taken int; v_status text; v_left int;
+declare v_cap int; v_day int; v_taken int; v_status text; v_name text;
 begin
-  st := _student(p_token);
-  if st.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
   if p_date < _today() then return jsonb_build_object('ok', false, 'error', 'past'); end if;
   if _closed(p_slot, p_date) then return jsonb_build_object('ok', false, 'error', 'closed'); end if;
 
   select capacity, day into v_cap, v_day from slots where id = p_slot and active;
   if v_cap is null then return jsonb_build_object('ok', false, 'error', 'missing'); end if;
   if extract(dow from p_date)::int <> v_day then return jsonb_build_object('ok', false, 'error', 'day'); end if;
+
+  if exists (select 1 from slot_students where slot_id = p_slot and student_id = p_student)
+     or exists (select 1 from bookings where slot_id = p_slot and student_id = p_student
+                and date = p_date and status in ('pending','approved','waitlist')) then
+    return jsonb_build_object('ok', false, 'error', 'exists');
+  end if;
+
+  select name into v_name from students where id = p_student;
+
+  -- a pending request holds a provisional seat, otherwise everyone books into a
+  -- full class and the academy has to turn people away one by one
+  v_taken := _slot_taken(p_slot, p_date) + _slot_pending(p_slot, p_date);
+  v_status := case when v_taken >= v_cap then 'waitlist' else 'pending' end;
+
+  insert into bookings (student_id, slot_id, date, note, status)
+    values (p_student, p_slot, p_date, coalesce(p_note,''), v_status);
+
+  perform _telegram('🐴 ' || v_name || ' — ' || to_char(p_date, 'DD Mon') || ' ' ||
+    (select "time" from slots where id = p_slot) || case when v_status = 'waitlist' then ' (waitlist)' else '' end);
+  perform _log(v_name, 'booking.request', to_char(p_date,'YYYY-MM-DD'));
+  return jsonb_build_object('ok', true, 'status', v_status);
+end $$;
+
+create or replace function public.student_book(p_token text, p_slot uuid, p_date date, p_note text default '')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare st students; v_left int;
+begin
+  st := _student(p_token);
+  if st.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
 
   if st.end_date is not null and st.end_date < p_date then
     return jsonb_build_object('ok', false, 'error', 'expired');
@@ -533,24 +609,59 @@ begin
             - (select count(*) from bookings b where b.student_id = st.id and b.status in ('pending','approved') and b.date >= _today());
   if v_left <= 0 then return jsonb_build_object('ok', false, 'error', 'nobalance'); end if;
 
-  if exists (select 1 from slot_students where slot_id = p_slot and student_id = st.id)
-     or exists (select 1 from bookings where slot_id = p_slot and student_id = st.id
-                and date = p_date and status in ('pending','approved','waitlist')) then
-    return jsonb_build_object('ok', false, 'error', 'exists');
+  return public._book(st.id, p_slot, p_date, p_note);
+end $$;
+
+-- a visitor with no account: same slot rules as student_book (via _book),
+-- minus the course-balance/expiry checks a guest doesn't have
+create or replace function public.guest_book(p_key text, p_name text, p_phone text,
+  p_slot uuid, p_date date, p_note text default '')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare g students;
+begin
+  if coalesce(p_key,'') = '' then return jsonb_build_object('ok', false, 'error', 'key'); end if;
+  if coalesce(trim(p_name),'') = '' then return jsonb_build_object('ok', false, 'error', 'name'); end if;
+  g := public._guest_upsert(p_key, trim(p_name), p_phone);
+  return public._book(g.id, p_slot, p_date, p_note);
+end $$;
+
+create or replace function public.guest_bookings(p_key text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare g students;
+begin
+  g := _guest(p_key);
+  if g.id is null then return jsonb_build_object('ok', true, 'name', '', 'phone', '', 'bookings', '[]'::jsonb); end if;
+  return jsonb_build_object('ok', true, 'name', g.name, 'phone', coalesce(g.phone,''),
+    'bookings', coalesce((select jsonb_agg(jsonb_build_object(
+        'id', b.id, 'slot_id', b.slot_id, 'date', b.date, 'status', b.status, 'reason', b.reason,
+        'created_at', b.created_at, 'time', s.time, 'day', s.day) order by b.date desc)
+        from bookings b join slots s on s.id = b.slot_id
+        where b.student_id = g.id and b.date >= _today() - 60), '[]'::jsonb));
+end $$;
+
+create or replace function public.guest_cancel(p_key text, p_id uuid, p_reason text default '')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare g students; b bookings; cutoff int; when_ts timestamptz;
+begin
+  g := _guest(p_key);
+  if g.id is null then return jsonb_build_object('ok', false, 'error', 'auth'); end if;
+  select * into b from bookings where id = p_id and student_id = g.id;
+  if not found then return jsonb_build_object('ok', false, 'error', 'missing'); end if;
+
+  cutoff := coalesce(nullif(_setting('cancel_cutoff_h','3'),'')::int, 3);
+  when_ts := (b.date::text || ' ' || (select "time" from slots where id = b.slot_id) || ':00')::timestamp
+             at time zone _setting('timezone','Asia/Dhaka');
+  -- only inside the window before the class; a class already past can be tidied up
+  if b.status = 'approved' and when_ts > now() and when_ts - now() < make_interval(hours => cutoff) then
+    return jsonb_build_object('ok', false, 'error', 'cutoff', 'hours', cutoff);
   end if;
 
-  -- a pending request holds a provisional seat, otherwise everyone books into a
-  -- full class and the academy has to turn people away one by one
-  v_taken := _slot_taken(p_slot, p_date) + _slot_pending(p_slot, p_date);
-  v_status := case when v_taken >= v_cap then 'waitlist' else 'pending' end;
-
-  insert into bookings (student_id, slot_id, date, note, status)
-    values (st.id, p_slot, p_date, coalesce(p_note,''), v_status);
-
-  perform _telegram('🐴 ' || st.name || ' — ' || to_char(p_date, 'DD Mon') || ' ' ||
-    (select "time" from slots where id = p_slot) || case when v_status = 'waitlist' then ' (waitlist)' else '' end);
-  perform _log(st.name, 'booking.request', to_char(p_date,'YYYY-MM-DD'));
-  return jsonb_build_object('ok', true, 'status', v_status);
+  update bookings set status = 'cancelled', reason = coalesce(p_reason,''), decided_at = now() where id = p_id;
+  perform _telegram('❌ ' || g.name || ' cancelled ' || to_char(b.date,'DD Mon') ||
+                    case when coalesce(p_reason,'') <> '' then ' — ' || p_reason else '' end);
+  perform _log(g.name, 'booking.cancel', coalesce(p_reason,''));
+  perform public._promote_waitlist(b.slot_id, b.date);
+  return jsonb_build_object('ok', true);
 end $$;
 
 create or replace function public.student_cancel(p_token text, p_id uuid, p_reason text default '')
@@ -1374,6 +1485,9 @@ grant execute on function
   public.student_session(text),
   public.student_book(text,uuid,date,text),
   public.student_cancel(text,uuid,text),
+  public.guest_book(text,text,text,uuid,date,text),
+  public.guest_bookings(text),
+  public.guest_cancel(text,uuid,text),
   public.student_absence(text,uuid,date,text),
   public.student_update(text,text,text),
   public.student_seen(text),

@@ -154,8 +154,9 @@ const revived = makeHandler(async () => fakeStore);
 const cold = await revived(req('POST', JSON.stringify({ fn: 'student_session', args: { p_token: Z } })));
 ok('a new function instance still knows the session', (await cold.json()).ok);
 
-ok('the public surface is the sign-in path only',
-  [...PUBLIC].sort().join(',') === 'admin_login,bootstrap,log_error,logout,student_login',
+ok('the public surface is the sign-in path plus guest booking',
+  [...PUBLIC].sort().join(',') ===
+    'admin_login,bootstrap,guest_book,guest_bookings,guest_cancel,log_error,logout,student_login',
   [...PUBLIC]);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

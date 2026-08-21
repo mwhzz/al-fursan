@@ -286,6 +286,65 @@ const imp = await call('admin_import', { p_token: A, p_data: exp.data, p_mode: '
 ov = await call('admin_session', { p_token: A });
 ok('merge import does not duplicate', imp.ok && ov.students.length === beforeCount, ov.students.length);
 
+/* --------------------------------------------------------- guest booking --
+   A visitor with no account gets a hidden row in students (is_guest, keyed
+   by a device id) instead of a null student_id on bookings, specifically so
+   the seat-counting rules above never have to treat two different guests as
+   the same "nobody" — the regression checked below. */
+const guestSlot = sess.schedule.find(s => s.day === 6 && s.time === '16:00');
+const guestDate = nextDow(6);
+const gKey1 = 'guest-device-1', gKey2 = 'guest-device-2';
+
+const g1 = await call('guest_book', { p_key: gKey1, p_name: 'Nadia', p_phone: '01700000000',
+  p_slot: guestSlot.id, p_date: guestDate });
+ok('a guest can book with no account', g1.ok && g1.status === 'pending', g1);
+const g1again = await call('guest_book', { p_key: gKey1, p_name: 'Nadia', p_phone: '01700000000',
+  p_slot: guestSlot.id, p_date: guestDate });
+ok('the same device cannot double-book the same class', g1again.error === 'exists', g1again);
+const g2 = await call('guest_book', { p_key: gKey2, p_name: 'Rafi', p_phone: '',
+  p_slot: guestSlot.id, p_date: guestDate });
+ok('a second guest can book the same class', g2.ok && g2.status === 'pending', g2);
+ok('booking with no name is refused',
+  (await call('guest_book', { p_key: 'guest-device-3', p_name: '', p_phone: '',
+    p_slot: guestSlot.id, p_date: guestDate })).error === 'name');
+
+ov = await call('admin_session', { p_token: A });
+const guestBookingIds = ov.bookings.filter(b => b.slot_id === guestSlot.id && b.date === guestDate).map(b => b.id);
+ok('both guest requests reach the console', guestBookingIds.length === 2, guestBookingIds);
+await call('admin_booking_action', { p_token: A, p_ids: guestBookingIds, p_action: 'approve', p_reason: '' });
+const bootAfterApprove = await call('bootstrap', {});
+const guestSeat = bootAfterApprove.seats[guestSlot.id + '|' + guestDate];
+ok('two different guests approved into one slot occupy two distinct seats',
+  !!guestSeat && guestSeat.taken === 2, guestSeat);
+
+const mine1 = await call('guest_bookings', { p_key: gKey1 });
+ok('a guest can see their own booking by device key',
+  mine1.ok && mine1.name === 'Nadia' && mine1.bookings.length === 1 &&
+  mine1.bookings[0].slot_id === guestSlot.id, mine1);
+const mine2 = await call('guest_bookings', { p_key: gKey2 });
+ok('a different device sees only its own booking',
+  mine2.ok && mine2.bookings.length === 1 && mine2.bookings[0].id !== mine1.bookings[0].id,
+  { mine1, mine2 });
+ok('an unknown device key has nothing to see',
+  (await call('guest_bookings', { p_key: 'never-booked' })).bookings.length === 0);
+
+const cancel1 = await call('guest_cancel', { p_key: gKey1, p_id: mine1.bookings[0].id, p_reason: 'plans changed' });
+ok('a guest can cancel their own booking', cancel1.ok, cancel1);
+const wrongCancel = await call('guest_cancel', { p_key: gKey2, p_id: mine1.bookings[0].id, p_reason: '' });
+ok('a guest cannot cancel a booking that is not theirs', wrongCancel.error === 'missing', wrongCancel);
+
+const bootAfterGuests = await call('bootstrap', {});
+ok('a guest never appears in the public name directory',
+  !bootAfterGuests.directory.some(d => d.name === 'Nadia' || d.name === 'Rafi'), bootAfterGuests.directory);
+ok('a guest cannot log in as a rider — no PIN was ever set for them',
+  !(await call('student_login', { p_name: 'Rafi', p_pin: '0000' })).ok);
+
+ov = await call('admin_session', { p_token: A });
+const guestRow = ov.students.find(s => s.name === 'Rafi');
+ok('the console can tell a guest apart from a rider', !!guestRow && guestRow.is_guest === true, guestRow);
+ok('a guest raises no course alerts — there is no course to expire or pay for',
+  !ov.alerts.exhausted.some(x => x.name === 'Rafi') && !ov.alerts.unpaid.some(x => x.name === 'Rafi'));
+
 /* --------------------------------------------------------------- logout */
 await call('logout', { p_token: TOK });
 ok('logout invalidates the token', !(await call('student_session', { p_token: TOK })).ok);

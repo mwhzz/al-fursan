@@ -354,14 +354,17 @@
     const cap = slot.capacity || 3;
     const full = seatsTaken(b.slot_id, b.date) >= cap;
 
-    const flags = [
-      left <= 0 ? U.badge(t('noBalance'), 'bad', true) : U.badge(t('classesLeftShort', { n: n(left) }),
-        left <= 2 ? 'wait' : 'ok'),
-      expired ? U.badge(t('expired'), 'bad', true) : '',
+    // a guest has no course/balance to report — show who they are instead
+    const flags = (s.is_guest
+      ? [U.badge(t('guestBadge'), 'plain'), s.phone ? U.badge(s.phone, 'plain') : '']
+      : [left <= 0 ? U.badge(t('noBalance'), 'bad', true) : U.badge(t('classesLeftShort', { n: n(left) }),
+          left <= 2 ? 'wait' : 'ok'),
+        expired ? U.badge(t('expired'), 'bad', true) : '']
+    ).concat([
       conflict ? U.badge(t('conflict'), 'wait', true) : '',
       full ? U.badge(t('full'), 'bad', true) : '',
       b.status === 'waitlist' ? U.badge(t('waitlist'), 'wait') : ''
-    ].filter(Boolean).join('');
+    ]).filter(Boolean).join('');
 
     return '<div class="item' + (picked[b.id] ? ' picked' : '') + '" data-state="' + U.esc(b.status) + '">' +
       (selectable ? '<label class="check" style="padding:0"><input type="checkbox" data-pick="' + U.esc(b.id) +
@@ -446,7 +449,8 @@
   /* =============================== RIDERS ================================ */
   function ridersView() {
     const q = query.trim().toLowerCase();
-    let list = (D.students || []).filter(s =>
+    // guests are hidden rows behind a device key, not riders to manage here
+    let list = (D.students || []).filter(s => !s.is_guest).filter(s =>
       filter === 'all' ? true : filter === 'active' ? s.active !== false : s.active === false);
     if (q) list = list.filter(s => s.name.toLowerCase().includes(q) ||
       (s.tags || []).join(' ').toLowerCase().includes(q) || (s.phone || '').includes(q));

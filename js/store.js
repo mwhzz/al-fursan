@@ -86,6 +86,20 @@
         telegram_token: '', telegram_chat: ''
       },
       students, slots, link, attendance, invoices, payments,
+      horses: [
+        { id: uid(), name: 'Shahzada', breed: 'Marwari', colour: 'Bay', age: 9, height: '15.1 hh',
+          level: 'intermediate', temperament: 'Forward and brave, loves to work. Give a light hand — he answers the smallest aid.',
+          note: '', active: true },
+        { id: uid(), name: 'Noor', breed: 'Arabian', colour: 'Grey', age: 12, height: '14.3 hh',
+          level: 'beginner', temperament: 'Gentle and patient, the one every first lesson starts on. Nothing rattles her.',
+          note: '', active: true },
+        { id: uid(), name: 'Rustam', breed: 'Thoroughbred cross', colour: 'Chestnut', age: 7, height: '16.0 hh',
+          level: 'advanced', temperament: 'Big mover with a big engine. Honest over fences, but wants a confident rider.',
+          note: '', active: true },
+        { id: uid(), name: 'Laila', breed: 'Sindhi', colour: 'Black', age: 10, height: '14.2 hh',
+          level: 'beginner', temperament: 'Steady and kind, a little lazy in the school. Perfect for building confidence.',
+          note: '', active: true }
+      ],
       bookings: [], closures: [], notifications: [],
       admins: [
         // the academy's owners
@@ -113,6 +127,7 @@
     db.bookings = [];
     db.notifications = [];
     db.activity = [];
+    db.horses = [];              // the academy adds its own horses
     return db;
   }
 
@@ -200,11 +215,26 @@
       cycle_done: db.attendance.filter(a => a.student_id === s.id && a.status === 'present'
         && a.date >= s.start_date).length,
       unpaid: unpaidOf(s.id),
-      guide: s.guide || 0
+      guide: s.guide || 0,
+      is_guest: !!s.is_guest
     };
     if (forAdmin) o.pin = s.pin;
     return o;
   };
+
+  /** confirmed + waiting seat counts for every active slot, next 5 weeks —
+      shared by bootstrap() (signed-out) and student_session() (signed-in) */
+  function seatsMap() {
+    const seats = {};
+    const start = new Date();
+    for (let i = 0; i <= 34; i++) {
+      const d = addDays(start, i), ds = iso(d), dow = d.getDay();
+      db.slots.filter(x => x.active !== false && x.day === dow).forEach(x => {
+        seats[x.id + '|' + ds] = { taken: slotTaken(x.id, ds), pending: slotPending(x.id, ds) };
+      });
+    }
+    return seats;
+  }
 
   const publicSettings = () => ({
     academy_name: setting('academy_name', 'Al Fursan Equestrian Academy'),
@@ -220,6 +250,43 @@
     vapid_public: setting('vapid_public'),
     today: today()
   });
+
+  /** the horses a rider may read about and choose from */
+  const publicHorses = () => (db.horses || [])
+    .filter(h => h.active !== false)
+    .map(h => ({
+      id: h.id, name: h.name, breed: h.breed, colour: h.colour, age: h.age,
+      height: h.height, level: h.level, temperament: h.temperament
+    }))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+  /** a horse cannot be in two classes at the same time */
+  const horseBusy = (horseId, slotId, date, exceptBooking) => (db.bookings || []).some(b =>
+    b.horse_id === horseId && b.slot_id === slotId && b.date === date &&
+    b.id !== exceptBooking && ['pending', 'approved', 'waitlist'].includes(b.status));
+
+  /* --------------------------------- guests -------------------------------
+     A visitor who books without an account gets a normal (but hidden) row in
+     students, keyed by a random id their browser keeps in localStorage. That
+     way every seat-counting rule above — written in terms of student_id —
+     keeps working unchanged, and the row never shows up anywhere a real
+     rider would: active is false, so bootstrap()'s directory, student_login,
+     and the admin alert buckets all skip it on their own. */
+  const guestOf = key => key ? db.students.find(x => x.is_guest && x.guest_key === key) : null;
+
+  function upsertGuest(key, name, phone) {
+    let s = guestOf(key);
+    if (!s) {
+      s = { id: uid(), name, pin: '0000', phone: phone || '', course: 'basic',
+        total_classes: 0, start_date: today(), end_date: null, tags: [], note: '',
+        active: false, is_guest: true, guest_key: key, created_at: nowISO() };
+      db.students.push(s);
+    } else {
+      s.name = name;
+      if (phone) s.phone = phone;
+    }
+    return s;
+  }
 
   const DENY = { ok: false, error: 'auth' };
   const session = t => db.sessions[t];
@@ -289,6 +356,44 @@
     }
   }
 
+  /** past/closed/missing/day-mismatch checks shared by student_book and guest_book */
+  function checkSlot(p_slot, p_date) {
+    if (p_date < today()) return { error: 'past' };
+    if (closed(p_slot, p_date)) return { error: 'closed' };
+    const slot = db.slots.find(x => x.id === p_slot && x.active !== false);
+    if (!slot) return { error: 'missing' };
+    if (new Date(p_date + 'T00:00:00').getDay() !== slot.day) return { error: 'day' };
+    return { slot };
+  }
+
+  /** duplicate/horse/capacity checks and the actual insert, shared by student_book and guest_book */
+  function finishBooking(s, slot, p_slot, p_date, p_note, p_horse) {
+    if (db.link.some(l => l.slot_id === p_slot && l.student_id === s.id) ||
+        db.bookings.some(b => b.slot_id === p_slot && b.student_id === s.id && b.date === p_date &&
+          ['pending', 'approved', 'waitlist'].includes(b.status)))
+      return { ok: false, error: 'exists' };
+
+    // the rider may ask for a particular horse, if it is free that hour
+    let horseId = null;
+    if (p_horse) {
+      const h = (db.horses || []).find(x => x.id === p_horse && x.active !== false);
+      if (!h) return { ok: false, error: 'horse' };
+      if (horseBusy(p_horse, p_slot, p_date)) return { ok: false, error: 'horsebusy', horse: h.name };
+      horseId = h.id;
+    }
+
+    // a pending request holds a provisional seat (same rule as the SQL backend)
+    const status = slotTaken(p_slot, p_date) + slotPending(p_slot, p_date) >= (slot.capacity || 3)
+      ? 'waitlist' : 'pending';
+    db.bookings.push({ id: uid(), student_id: s.id, slot_id: p_slot, date: p_date, horse_id: horseId,
+      status, note: p_note || '', reason: '', seen: false, created_at: nowISO(), decided_at: null });
+    log(s.name, 'booking.request', p_date);
+    alert_(status === 'waitlist' ? 'New waitlist request' : 'New booking request',
+      s.name + ' — ' + occasion(p_date, p_slot));
+    commit();
+    return { ok: true, status };
+  }
+
   /* ---------------- handlers ---------------- */
   const H = {
     bootstrap() {
@@ -298,7 +403,13 @@
           ? db.students.filter(s => s.active !== false)
               .map(s => ({ id: s.id, name: s.name }))
               .sort((a, b) => a.name.localeCompare(b.name))
-          : []
+          : [],
+        horses: publicHorses(),
+        // lets a signed-out visitor see the schedule and seat counts before
+        // they have any reason to log in or book anything
+        schedule: schedule(false),
+        seats: seatsMap(),
+        closures: db.closures.filter(c => c.date >= today())
       };
     },
 
@@ -318,14 +429,7 @@
     student_session({ p_token }) {
       const s = studentOf(p_token);
       if (!s) return DENY;
-      const seats = {};
-      const start = new Date();
-      for (let i = 0; i <= 34; i++) {
-        const d = addDays(start, i), ds = iso(d), dow = d.getDay();
-        db.slots.filter(x => x.active !== false && x.day === dow).forEach(x => {
-          seats[x.id + '|' + ds] = { taken: slotTaken(x.id, ds), pending: slotPending(x.id, ds) };
-        });
-      }
+      const seats = seatsMap();
       return {
         ok: true,
         settings: publicSettings(),
@@ -335,7 +439,8 @@
         bookings: db.bookings.filter(b => b.student_id === s.id && b.date >= iso(addDays(new Date(), -60)))
           .map(b => {
             const sl = db.slots.find(x => x.id === b.slot_id) || {};
-            return Object.assign({}, b, { time: sl.time, day: sl.day });
+            const hs = (db.horses || []).find(x => x.id === b.horse_id) || {};
+            return Object.assign({}, b, { time: sl.time, day: sl.day, horse: hs.name || null });
           }).sort((a, b) => b.date.localeCompare(a.date)),
         invoices: invoicesOf(s.id),
         notifications: db.notifications.filter(x => x.student_id === s.id).slice(0, 40),
@@ -345,35 +450,62 @@
       };
     },
 
-    student_book({ p_token, p_slot, p_date, p_note }) {
+    student_book({ p_token, p_slot, p_date, p_note, p_horse }) {
       const s = studentOf(p_token);
       if (!s) return DENY;
-      if (p_date < today()) return { ok: false, error: 'past' };
-      if (closed(p_slot, p_date)) return { ok: false, error: 'closed' };
-      const slot = db.slots.find(x => x.id === p_slot && x.active !== false);
-      if (!slot) return { ok: false, error: 'missing' };
-      if (new Date(p_date + 'T00:00:00').getDay() !== slot.day) return { ok: false, error: 'day' };
+      const chk = checkSlot(p_slot, p_date);
+      if (chk.error) return { ok: false, error: chk.error };
       if (s.end_date && s.end_date < p_date) return { ok: false, error: 'expired' };
 
       const upcoming = db.bookings.filter(b => b.student_id === s.id &&
         ['pending', 'approved'].includes(b.status) && b.date >= today()).length;
       if (s.total_classes - doneCount(s.id) - upcoming <= 0) return { ok: false, error: 'nobalance' };
 
-      if (db.link.some(l => l.slot_id === p_slot && l.student_id === s.id) ||
-          db.bookings.some(b => b.slot_id === p_slot && b.student_id === s.id && b.date === p_date &&
-            ['pending', 'approved', 'waitlist'].includes(b.status)))
-        return { ok: false, error: 'exists' };
+      return finishBooking(s, chk.slot, p_slot, p_date, p_note, p_horse);
+    },
 
-      // a pending request holds a provisional seat (same rule as the SQL backend)
-      const status = slotTaken(p_slot, p_date) + slotPending(p_slot, p_date) >= (slot.capacity || 3)
-        ? 'waitlist' : 'pending';
-      db.bookings.push({ id: uid(), student_id: s.id, slot_id: p_slot, date: p_date,
-        status, note: p_note || '', reason: '', seen: false, created_at: nowISO(), decided_at: null });
-      log(s.name, 'booking.request', p_date);
-      alert_(status === 'waitlist' ? 'New waitlist request' : 'New booking request',
-        s.name + ' — ' + occasion(p_date, p_slot));
+    /* a visitor with no account: same slot rules as student_book, minus the
+       course-balance/expiry checks a guest doesn't have */
+    guest_book({ p_key, p_name, p_phone, p_slot, p_date, p_note }) {
+      if (!p_key) return { ok: false, error: 'key' };
+      const name = String(p_name || '').trim();
+      if (!name) return { ok: false, error: 'name' };
+      const chk = checkSlot(p_slot, p_date);
+      if (chk.error) return { ok: false, error: chk.error };
+      const s = upsertGuest(p_key, name, p_phone);
+      return finishBooking(s, chk.slot, p_slot, p_date, p_note, null);
+    },
+
+    guest_bookings({ p_key }) {
+      const s = guestOf(p_key);
+      if (!s) return { ok: true, name: '', phone: '', bookings: [] };
+      return {
+        ok: true, name: s.name, phone: s.phone || '',
+        bookings: db.bookings.filter(b => b.student_id === s.id && b.date >= iso(addDays(new Date(), -60)))
+          .map(b => {
+            const sl = db.slots.find(x => x.id === b.slot_id) || {};
+            return Object.assign({}, b, { time: sl.time, day: sl.day });
+          }).sort((a, b) => b.date.localeCompare(a.date))
+      };
+    },
+
+    guest_cancel({ p_key, p_id, p_reason }) {
+      const s = guestOf(p_key);
+      if (!s) return DENY;
+      const b = db.bookings.find(x => x.id === p_id && x.student_id === s.id);
+      if (!b) return { ok: false, error: 'missing' };
+      const cutoff = Number(setting('cancel_cutoff_h', '3')) || 3;
+      const slot = db.slots.find(x => x.id === b.slot_id) || { time: '00:00' };
+      const when = new Date(b.date + 'T' + slot.time + ':00');
+      if (b.status === 'approved' && when - new Date() < cutoff * 3600e3 && when > new Date())
+        return { ok: false, error: 'cutoff', hours: cutoff };
+      b.status = 'cancelled'; b.reason = p_reason || ''; b.decided_at = nowISO();
+      log(s.name, 'booking.cancel', p_reason || '');
+      alert_('Booking cancelled',
+        s.name + ' — ' + occasion(b.date, b.slot_id) + (p_reason ? ' · ' + p_reason : ''));
+      promoteWaitlist(b.slot_id, b.date);
       commit();
-      return { ok: true, status };
+      return { ok: true };
     },
 
     student_cancel({ p_token, p_id, p_reason }) {
@@ -479,9 +611,11 @@
         bookings: db.bookings.filter(b => b.date >= iso(addDays(new Date(), -30))).map(b => {
           const sl = db.slots.find(x => x.id === b.slot_id) || {};
           const st = db.students.find(x => x.id === b.student_id) || {};
-          return Object.assign({}, b, { time: sl.time, day: sl.day, student: st.name });
+          const hs = (db.horses || []).find(x => x.id === b.horse_id) || {};
+          return Object.assign({}, b, { time: sl.time, day: sl.day, student: st.name, horse: hs.name || null });
         }).sort((x, y) => String(y.created_at).localeCompare(String(x.created_at))),
         invoices: (db.invoices || []).map(i => Object.assign({}, i, { paid: paidOn(i.id) })),
+        horses: (db.horses || []).slice().sort((x, y) => String(x.name).localeCompare(String(y.name))),
         closures: db.closures.filter(c => c.date >= iso(addDays(new Date(), -30))),
         admins: db.admins.map(u => ({ id: u.id, username: u.username, display: u.display,
           role: u.role, active: u.active !== false })),
@@ -516,7 +650,8 @@
           .sort((x, y) => y.date.localeCompare(x.date)),
         bookings: db.bookings.filter(b => b.student_id === p_id).map(b => {
           const sl = db.slots.find(x => x.id === b.slot_id) || {};
-          return Object.assign({}, b, { time: sl.time });
+          const hs = (db.horses || []).find(x => x.id === b.horse_id) || {};
+          return Object.assign({}, b, { time: sl.time, horse: hs.name || null });
         }).sort((x, y) => y.date.localeCompare(x.date)),
         invoices: invoicesOf(p_id),
         slots: db.link.filter(l => l.student_id === p_id)
@@ -683,6 +818,49 @@
       db.slots = db.slots.filter(s => s.id !== p_id);
       db.link = db.link.filter(l => l.slot_id !== p_id);
       log(a.username, 'slot.delete', '');
+      commit();
+      return { ok: true };
+    },
+
+    /* ------------------------------- horses ------------------------------- */
+    admin_save_horse({ p_token, p_data }) {
+      const a = adminOf(p_token);
+      if (!a) return DENY;
+      const d = p_data || {};
+      const name = String(d.name || '').trim();
+      if (!name) return { ok: false, error: 'name' };
+      db.horses = db.horses || [];
+      if (db.horses.some(h => h.name.trim().toLowerCase() === name.toLowerCase() && h.id !== d.id))
+        return { ok: false, error: 'duplicate' };
+
+      let h = db.horses.find(x => x.id === d.id);
+      const created = !h;
+      if (!h) { h = { id: uid(), created_at: nowISO() }; db.horses.push(h); }
+      Object.assign(h, {
+        name,
+        breed: String(d.breed || '').trim(),
+        colour: String(d.colour || '').trim(),
+        age: d.age === '' || d.age == null ? null : Number(d.age),
+        height: String(d.height || '').trim(),
+        level: ['beginner', 'intermediate', 'advanced', 'any'].indexOf(d.level) >= 0 ? d.level : 'any',
+        temperament: String(d.temperament || '').trim(),
+        note: String(d.note || '').trim(),
+        active: d.active !== false
+      });
+      log(a.username, created ? 'horse.create' : 'horse.update', name);
+      commit();
+      return { ok: true, id: h.id };
+    },
+
+    admin_delete_horse({ p_token, p_id }) {
+      const a = adminOf(p_token);
+      if (!a) return DENY;
+      const h = (db.horses || []).find(x => x.id === p_id);
+      if (!h) return { ok: false, error: 'missing' };
+      db.horses = db.horses.filter(x => x.id !== p_id);
+      // bookings keep their history; they simply no longer name a horse
+      db.bookings.forEach(b => { if (b.horse_id === p_id) b.horse_id = null; });
+      log(a.username, 'horse.delete', h.name);
       commit();
       return { ok: true };
     },

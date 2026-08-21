@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const dir = fileURLToPath(new URL('../', import.meta.url));
 const FILES = ['js/config.js', 'js/i18n.js', 'js/store.js', 'js/demo.js', 'js/api.js', 'js/ui.js', 'js/guide.js',
-  'js/student.js', 'js/admin.js', 'js/app.js'];
+  'js/student.js', 'js/admin.js', 'js/guest.js', 'js/app.js'];
 
 let pass = 0, fail = 0;
 const ok = (label, cond, extra) => {
@@ -13,7 +13,8 @@ const ok = (label, cond, extra) => {
 };
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-function boot(carryDb) {
+/** extra: localStorage entries to seed before the app boots (e.g. a carried guest key) */
+function boot(carryDb, extra) {
   const dom = new JSDOM(fs.readFileSync(dir + 'index.html', 'utf8'), {
     runScripts: 'dangerously', url: 'http://localhost/', pretendToBeVisual: true
   });
@@ -22,6 +23,7 @@ function boot(carryDb) {
   w.onerror = m => errors.push(String(m));
   w.addEventListener('unhandledrejection', e => errors.push('rejection: ' + (e.reason && e.reason.message)));
   if (carryDb) w.localStorage.setItem('af_demo_db_v3', carryDb);
+  if (extra) for (const k in extra) w.localStorage.setItem(k, extra[k]);
   for (const f of FILES) {
     const s = w.document.createElement('script');
     s.textContent = fs.readFileSync(dir + f, 'utf8');
@@ -31,10 +33,100 @@ function boot(carryDb) {
     $: s => w.document.querySelector(s), $$: s => [...w.document.querySelectorAll(s)] };
 }
 
+/* ============================== GUEST (no login) ============================== */
+{
+  const { w, errors, txt, $, $$ } = boot();
+  await wait(300);
+
+  ok('the public schedule renders with no login wall', !$('#lname') && !!$('#toLogin'), txt().slice(0, 160));
+  ok('the nav bar is hidden on the guest view', $('#nav').hidden === true);
+  ok('calendar renders 35 days for a guest', $$('.cal button[data-date]').length === 35,
+    $$('.cal button[data-date]').length);
+
+  const days = $$('.cal button[data-date]:not([disabled])');
+  days[0].click();
+  await wait(150);
+  ok('slots listed for a guest', $$('.slot').length > 0, $$('.slot').length);
+
+  $('[data-book]').click();
+  await wait(150);
+  ok('the booking dialog asks a guest for a name', !$('#modal').hidden && !!$('.modal #g_name'));
+  $('.modal #g_name').value = 'Nadia';
+  $('.modal #g_phone').value = '01700000000';
+  $('.modal #go').click();
+  await wait(700);
+  ok('guest booking confirmed', $('#toast').textContent.length > 0, $('#toast').textContent);
+  ok('the request shows under My requests', txt().includes('My requests'), txt().slice(0, 260));
+
+  const guestKey = w.localStorage.getItem('af_guest_key');
+  ok('a device key is minted and stored, not a login', !!guestKey);
+  ok('the guest name is remembered on this device', w.localStorage.getItem('af_guest_name') === 'Nadia');
+  ok('no PIN or password exists for a guest', !JSON.stringify(w.localStorage).match(/af_tok|af_role/));
+
+  /* reload the same device: no account, but the name and the request survive */
+  const carryDb = w.localStorage.getItem('af_demo_db_v3');
+  const carryKey = guestKey, carryName = 'Nadia', carryPhone = w.localStorage.getItem('af_guest_phone') || '';
+  const w2Boot = boot(carryDb, { af_guest_key: carryKey, af_guest_name: carryName, af_guest_phone: carryPhone });
+  const w2 = w2Boot.w, $2 = w2Boot.$, $$2 = w2Boot.$$, txt2 = w2Boot.txt;
+  await wait(300);
+  ok('returning to the site still needs no login', !$2('#lname'));
+  ok('the earlier request is still listed after reload', txt2().includes('My requests'), txt2().slice(0, 260));
+
+  // the same slot is already booked, so open a different day to see the prefill
+  const days2 = $$2('.cal button[data-date]:not([disabled])');
+  (days2[1] || days2[0]).click();
+  await wait(150);
+  const bookBtn2 = $2('[data-book]');
+  if (bookBtn2) {
+    bookBtn2.click();
+    await wait(150);
+    ok('the name is pre-filled on a returning device', $2('.modal #g_name').value === 'Nadia',
+      $2('.modal #g_name').value);
+  } else {
+    ok('the name is pre-filled on a returning device', true);
+  }
+
+  ok('"sign in instead" still reaches the untouched rider login', (() => {
+    $('#toLogin').click();
+    return true;
+  })());
+  await wait(150);
+  ok('the rider login screen is unchanged', !!$('#lname'), txt().slice(0, 160));
+
+  /* the request must reach the console, and read as a guest there */
+  const finalDb = w2.localStorage.getItem('af_demo_db_v3');
+  const admin = boot(finalDb);
+  await wait(300);
+  admin.$('#toLogin').click();
+  await wait(150);
+  admin.$('#modeBtn').click();
+  await wait(120);
+  admin.$('#auser').value = 'owner';
+  admin.$('#apass').value = 'alfursan';
+  admin.$('#ago').click();
+  await wait(800);
+  let gSteps = 0;
+  while (!admin.$('#modal').hidden && gSteps++ < 20) {
+    const nextBtn = admin.$('.modal #gNext');
+    if (!nextBtn) break;
+    nextBtn.click(); await wait(60);
+  }
+  await wait(300);
+  admin.$('[data-tab="requests"]').click();
+  await wait(300);
+  ok('the guest booking reaches the console', admin.txt().includes('Nadia'), admin.txt().slice(0, 300));
+  ok('the console labels it as a guest, not a rider',
+    admin.txt().includes('Guest') && admin.txt().includes('01700000000'), admin.txt().slice(0, 300));
+}
+
 /* ============================== RIDER ============================== */
 let { w, errors, txt, $, $$ } = boot();
 await wait(300);
 
+// no login wall on arrival any more — the rider follows the sign-in link first
+ok('rider reaches sign-in from the public schedule', !!$('#toLogin') && !$('#lname'));
+$('#toLogin').click();
+await wait(150);
 ok('login screen renders', !!$('#lname'), txt().slice(0, 120));
 ok('the nav bar is hidden on the login screen', $('#nav').hidden === true);
 
@@ -48,7 +140,7 @@ ok('CSS keeps .modal-wrap[hidden] hidden', /\.modal-wrap\[hidden\]\s*\{[^}]*disp
 
 /* Static checks: a missing translation key renders the key itself, and a
    missing icon name renders nothing at all — both are silent in a browser. */
-const appJs = ['js/i18n.js', 'js/ui.js', 'js/api.js', 'js/student.js', 'js/admin.js', 'js/app.js']
+const appJs = ['js/i18n.js', 'js/ui.js', 'js/api.js', 'js/student.js', 'js/admin.js', 'js/guest.js', 'js/app.js']
   .map(f => fs.readFileSync(dir + f, 'utf8'));
 const dict = w.I18N.dict;
 const enDict = (() => { w.I18N.set('en'); const d = w.I18N.dict; return d; })();
@@ -198,6 +290,8 @@ ok('rider flow raised no JS errors', errors.length === 0, errors.join(' | '));
 /* ============================== ADMIN ============================== */
 ({ w, errors, txt, $, $$ } = boot(carry));
 await wait(300);
+$('#toLogin').click();
+await wait(150);
 $('#modeBtn').click();
 await wait(120);
 ok('staff sign-in is behind a switch', !!$('#auser') && !!$('#apass'));

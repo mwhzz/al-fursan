@@ -300,13 +300,24 @@
       API.session.clear();
     }
 
-    mode = route.role === 'admin' ? 'admin' : 'student';
-    loginView();
+    // no one signed in: land on the public schedule, not a login wall — a
+    // rider/admin who does have an account reaches loginView() from there
+    if (route.role === 'admin' || route.role === 'student') {
+      mode = route.role;
+      loginView();
+    } else {
+      started = 'guest';
+      GUEST.start(boot, route);
+    }
   }
 
   U.router.on(r => {
     if (started === 'student' && r.role === 'student') STUDENT.route(r);
     else if (started === 'admin' && r.role === 'admin') ADMIN.route(r);
+    else if (started === 'guest') {
+      if (r.role === 'admin' || r.role === 'student') { mode = r.role; step = 'name'; errorMsg = ''; loginView(); }
+      else GUEST.route(r);
+    }
   });
 
   /* ------------------------------------------------------------------ PWA --*/

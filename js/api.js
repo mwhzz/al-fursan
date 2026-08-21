@@ -139,13 +139,36 @@
 
   const T = () => session.token;
 
+  /* one random id per device, for a visitor who books without an account.
+     localStorage (not sessionStorage): the whole point is that it survives a
+     closed tab, and it is never touched by session.clear(). */
+  const guestKey = {
+    get() { try { return localStorage.getItem('af_guest_key'); } catch (e) { return null; } },
+    ensure() {
+      let k = guestKey.get();
+      if (k) return k;
+      k = crypto.randomUUID ? crypto.randomUUID()
+        : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+            const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+          });
+      try { localStorage.setItem('af_guest_key', k); } catch (e) {}
+      return k;
+    }
+  };
+
   window.API = {
-    LIVE, rpc, cache, session, report,
+    LIVE, rpc, cache, session, guestKey, report,
     get backend() { return mode; },
     get online() { return online; },
     onConnection(fn) { listeners.push(fn); },
 
     bootstrap: () => rpc('bootstrap', {}),
+
+    /* guest (no account) */
+    guestBook: (name, phone, slot, date, note) => rpc('guest_book',
+      { p_key: guestKey.ensure(), p_name: name, p_phone: phone || '', p_slot: slot, p_date: date, p_note: note || '' }),
+    guestBookings: () => rpc('guest_bookings', { p_key: guestKey.ensure() }),
+    guestCancel: (id, reason) => rpc('guest_cancel', { p_key: guestKey.ensure(), p_id: id, p_reason: reason || '' }),
 
     /* rider */
     studentLogin: (id, name, pin, days) =>

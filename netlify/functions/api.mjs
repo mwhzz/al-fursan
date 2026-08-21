@@ -24,7 +24,8 @@ const KEY = process.env.AF_DB_KEY || 'db';
 
 /* Everything a signed-out visitor may call. Everything else needs a token, and
    the store checks the token itself. */
-export const PUBLIC = new Set(['bootstrap', 'student_login', 'admin_login', 'log_error', 'logout']);
+export const PUBLIC = new Set(['bootstrap', 'student_login', 'admin_login', 'log_error', 'logout',
+  'guest_book', 'guest_bookings', 'guest_cancel']);
 
 /* Push notifications, so a booking reaches the academy with the app closed.
    The signing keys are made once and kept in the database — the private half
